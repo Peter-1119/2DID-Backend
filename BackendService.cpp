@@ -6,6 +6,7 @@
 #include <mysql.h>    // 使用原生 C API
 #include <nlohmann/json.hpp>
 #include <cpr/cpr.h>
+#include <iomanip>
 
 #include <iostream>
 #include <vector>
@@ -175,9 +176,10 @@ public:
     }
 };
 
-// --- Parse SOAP Response ---
+// --- Parse SOAP Response (修正版：包含第一行數據) ---
 WorkOrderData parseSoapResponse(string raw, string inputWO, int cmdType) {
     WorkOrderData data;
+    // 檢查是否回傳成功
     if (raw.find("OK") != 0) return data;
 
     stringstream ss(raw);
@@ -187,35 +189,47 @@ WorkOrderData parseSoapResponse(string raw, string inputWO, int cmdType) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
         if (!line.empty()) lines.push_back(line);
     }
-    if (lines.size() < 2) return data;
-
-    stringstream headerSS(lines[1]);
-    string segment;
-    vector<string> headerParts;
-    while(getline(headerSS, segment, ';')) headerParts.push_back(segment);
+    
+    if (lines.empty()) return data;
 
     data.workorder = inputWO;
-    if (cmdType == 235 && headerParts.size() > 1) {
-        data.item = headerParts[0]; data.workStep = headerParts[1];
-    } else if (cmdType == 236 && headerParts.size() > 2) {
-        data.item = headerParts[1]; data.workStep = headerParts[2];
-    }
-    
-    data.panel_num = lines.size() - 1; 
+    data.panel_num = lines.size(); // 現在包含第一行，所以總數就是行數
 
-    for (size_t i = 1; i < lines.size(); ++i) {
+    // 迴圈從 0 開始，不跳過第一行
+    for (size_t i = 0; i < lines.size(); ++i) {
         stringstream lineSS(lines[i]);
+        string segment;
         vector<string> parts;
         while(getline(lineSS, segment, ';')) parts.push_back(segment);
 
-        if (cmdType == 235 && parts.size() >= 6) {
-            data.sht_no.push_back(parts[2]); data.panel_no.push_back(parts[3]);
-            data.twodid_step.push_back(parts[4]); data.twodid_type.push_back(parts[5]);
-        } else if (cmdType == 236 && parts.size() >= 7) {
-            data.sht_no.push_back(parts[3]); data.panel_no.push_back(parts[4]);
-            data.twodid_step.push_back(parts[5]); data.twodid_type.push_back(parts[6]);
+        // ✅ 關鍵修正：如果是第一行 (i==0)，因為前面多了 "OK;"，所以索引要 +1
+        int offset = (i == 0) ? 1 : 0;
+
+        // 1. 如果是第一行，順便抓取全域資訊 (Item, WorkStep)
+        if (i == 0) {
+            if (cmdType == 235 && parts.size() > (1 + offset)) {
+                data.item = parts[0 + offset]; 
+                data.workStep = parts[1 + offset];
+            } else if (cmdType == 236 && parts.size() > (2 + offset)) {
+                data.item = parts[1 + offset]; 
+                data.workStep = parts[2 + offset];
+            }
+        }
+
+        // 2. 抓取每行的製品資訊 (套用 offset)
+        if (cmdType == 235 && parts.size() >= (6 + offset)) {
+            data.sht_no.push_back(parts[2 + offset]); 
+            data.panel_no.push_back(parts[3 + offset]);
+            data.twodid_step.push_back(parts[4 + offset]); 
+            data.twodid_type.push_back(parts[5 + offset]);
+        } else if (cmdType == 236 && parts.size() >= (7 + offset)) {
+            data.sht_no.push_back(parts[3 + offset]); 
+            data.panel_no.push_back(parts[4 + offset]);
+            data.twodid_step.push_back(parts[5 + offset]); 
+            data.twodid_type.push_back(parts[6 + offset]);
         }
     }
+    
     data.valid = true;
     return data;
 }
@@ -447,14 +461,61 @@ struct CORSHandler {
         if (req.method == crow::HTTPMethod::Options) {
             res.code = 204;
             res.end();
+            return; // 直接返回，Crow 就不會印出預設的 Log (視 Crow 版本而定，或是手動過濾 Log)
         }
+    }
+};
+
+// 取得當前時間字串，格式：yyyy-MM-dd HH:mm:ss
+string getCurrentDateTimeStr() {
+    auto now = std::chrono::system_clock::now();
+    std::time_t t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm_buf{};
+
+    // Windows 使用 localtime_s (安全性較高)
+    #ifdef _WIN32
+        localtime_s(&tm_buf, &t);
+    #else
+        localtime_r(&t, &tm_buf); // Linux
+    #endif
+
+    std::stringstream ss;
+    ss << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S");
+    return ss.str();
+}
+
+// ✅ [修正] 自訂 Logger 類別
+class CustomLogger : public crow::ILogHandler {
+public:
+    void log(const std::string& message, crow::LogLevel level) override {
+        
+        // (選擇性) 只顯示 INFO 以上的訊息
+        // if (level < crow::LogLevel::Info) return;
+
+        string levelStr;
+        switch (level) {
+            case crow::LogLevel::Debug:   levelStr = "DEBUG"; break;
+            case crow::LogLevel::Info:    levelStr = "INFO "; break;
+            case crow::LogLevel::Warning: levelStr = "WARN "; break;
+            case crow::LogLevel::Error:   levelStr = "ERROR"; break;
+            case crow::LogLevel::Critical:levelStr = "CRIT "; break;
+        }
+
+        // 使用你的 getCurrentDateTimeStr() 函式
+        std::cout << "(" << getCurrentDateTimeStr() << ") [" << levelStr << "] " << message << std::endl;
     }
 };
 
 // --- Main Server ---
 int main() {
+    static CustomLogger logger;
+    crow::logger::setHandler(&logger);
+
     dbPool = make_shared<DbPool>(DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_NAME);
-    // crow::SimpleApp app;
+    
+    // 設定 Log 層級 (選用)
+    crow::logger::setLogLevel(crow::LogLevel::Info);
+
     crow::App<CORSHandler> app;
 
     // API 1: Write DB
@@ -528,8 +589,8 @@ int main() {
         string item = x.value("item", "NA");
         string step = x.value("workStep", "NA");
         
-        string msg = string(x["workOrder"]) + ";" + item + ";" + step + ";" + string(x["sht_no"]) + ";" + string(x["panel_no"]) + ";NA;NOW;" + string(x["twodid_type"]) + ";" + string(x["remark"]) + ";;";
-        
+        string msg = string(x["workOrder"]) + ";" + item + ";" + step + ";" + string(x["sht_no"]) + ";" + string(x["panel_no"]) + ";" + step + ";" + getCurrentDateTimeStr() + ";" + string(x["twodid_type"]) + ";" + string(x["remark"]) + ";;";
+
         SoapClient::sendRequest(239, emp, msg);
         
         vector<ScannedData> list;
@@ -559,7 +620,7 @@ int main() {
             string item = x.value("item", "NA");
             string step = x.value("workStep", "NA");
             
-            string msg = wo + ";" + item + ";" + step + ";" + sht + ";" + pnl + ";NA;NOW;" + ret + ";" + rem + ";;";
+            string msg = wo + ";" + item + ";" + step + ";" + sht + ";" + pnl + ";" + step + ";" + getCurrentDateTimeStr() + ";" + ret + ";" + rem + ";;";
             futures.push_back(std::async(std::launch::async, [emp, msg](){ return SoapClient::sendRequest(239, emp, msg); }));
 
             dbList.push_back({wo, sht, pnl, ret, rem, std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count()});
