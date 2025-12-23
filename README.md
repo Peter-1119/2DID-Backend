@@ -88,6 +88,7 @@ g++ BackendService.cpp -o backend.exe \
 * 成功啟動後，您將在 Console 看到 Crow 的啟動訊息。
 
 ---
+
 ## 📡 API 介面文件 (API Documentation)
 所有 API 均接收 JSON 格式請求，並回傳 JSON 格式結果。
 
@@ -249,6 +250,8 @@ g++ BackendService.cpp -o backend.exe \
 }
 ```
 
+---
+
 ## 💾 資料庫結構 (Database Schema)
 本服務依賴以下 MySQL 資料表 (InnoDB)：
 
@@ -263,6 +266,8 @@ Columns: `work_order`, `sheet_no`, `panel_no`, `twodid_step`, `twodid_type`.
 `2DID_scanned_products`: 儲存實際掃描與上傳的紀錄。
 
 Columns: `work_order`, `sheet_no`, `panel_no`, `twodid_type`, `twodid_status`, `timestamp`.
+
+---
 
 ## ⚠️ 注意事項
 1. **網路環境:** 請確保執行電腦能通過 TCP Port `3306` 連線至資料庫伺服器，並能通過 HTTP 連線至 MES 伺服器。
