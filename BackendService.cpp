@@ -159,7 +159,7 @@ public:
                 {"SOAPAction", SOAP_ACTION},
                 {"Connection", "keep-alive"} 
             },
-            cpr::Timeout{3000} // 一般請求 3秒超時
+            cpr::Timeout{1000} // 一般請求 3秒超時
         );
 
         if (r.error.code != cpr::ErrorCode::OK || r.status_code != 200) {
@@ -553,7 +553,7 @@ int main() {
         return crow::response(json{{"success", true}}.dump());
     });
 
-    // API 2: Read WorkOrder (保持不變)
+    // API 2: Read WorkOrder
     CROW_ROUTE(app, "/api/workorder").methods(crow::HTTPMethod::Post)
     ([](const crow::request& req){
         auto x = json::parse(req.body);
@@ -561,10 +561,24 @@ int main() {
         string emp = x.value("emp_no", "");
         bool insertDB = x.value("insert_to_database", false);
 
+        // 1. 先查本地 DB
         json dbResult = readWorkOrderFromDB(wo);
         if (dbResult != nullptr) return crow::response(json{{"success", true}, {"source", "DB"}, {"data", dbResult}}.dump());
 
+        // 2. 檢查連線狀態 (Fast Fail)
+        // [Req 4] 若已知斷線，直接回傳錯誤，不讓前端空等
+        if (!g_isMesOnline) {
+            return crow::response(json{{"success", false}, {"type", "mes_offline"}, {"message", "因與 IT server 網路中斷，因此工單查詢失敗"}}.dump());
+        }
+
+        // 3. 嘗試 CMD 235
         string res235 = SoapClient::sendRequest(235, emp, wo);
+        
+        // [Req 4] 二次檢查：如果回傳空字串，代表連線剛剛超時或失敗了
+        if (res235.empty() && !g_isMesOnline) {
+            return crow::response(json{{"success", false}, {"type", "mes_offline"}, {"message", "因與 IT server 網路中斷，因此工單查詢失敗"}}.dump());
+        }
+
         WorkOrderData d235 = parseSoapResponse(res235, wo, 235);
         if (d235.valid) {
             if (insertDB) saveWorkOrderToDB(d235);
@@ -574,7 +588,15 @@ int main() {
             return crow::response(json{{"success", true}, {"source", "API235"}, {"data", j}}.dump());
         }
 
+        // 4. 嘗試 CMD 236
+        // 如果 235 只是查無資料(但連線正常)，才繼續查 236
         string res236 = SoapClient::sendRequest(236, emp, wo);
+
+        // [Req 4] 同樣檢查 236 的連線狀況
+        if (res236.empty() && !g_isMesOnline) {
+            return crow::response(json{{"success", false}, {"type", "mes_offline"}, {"message", "因與 IT server 網路中斷，因此工單查詢失敗"}}.dump());
+        }
+
         WorkOrderData d236 = parseSoapResponse(res236, wo, 236);
         if (d236.valid) {
             if (insertDB) saveWorkOrderToDB(d236);
@@ -583,14 +605,22 @@ int main() {
             j["scanned_data"] = nullptr;
             return crow::response(json{{"success", true}, {"source", "API236"}, {"data", j}}.dump());
         }
+
         return crow::response(json{{"success", false}, {"message", "查無資料"}}.dump());
     });
 
-    // API 3: CMD 238 (保持不變)
+    // API 3: CMD 238
     CROW_ROUTE(app, "/api/twodid").methods(crow::HTTPMethod::Post)
     ([](const crow::request& req){
         auto x = json::parse(req.body);
+        
+        // [Req 4] 檢查連線狀態
+        if (!g_isMesOnline) return crow::response(json{{"success", false}, {"type", "mes_offline"}, {"message", "因與 IT server 網路中斷，因此 2DID 資訊查詢失敗"}}.dump());
+
         string raw = SoapClient::sendRequest(238, x["emp_no"], x["twodid"]);
+
+        // [Req 4] 檢查是否因為 timeout 導致回傳空字串
+        if (raw.empty() && !g_isMesOnline) return crow::response(json{{"success", false}, {"type", "mes_offline"}, {"message", "因與 IT server 網路中斷，因此 2DID 資訊查詢失敗"}}.dump());
         if (raw.find("OK") == 0) return crow::response(json{{"success", true}, {"result", {{"result", raw}}}}.dump());
         return crow::response(json{{"success", false}, {"message", "Not Found"}}.dump());
     });
@@ -605,11 +635,12 @@ int main() {
         string step = x.value("workStep", "NA");
         string type = x.value("twodid_type", "Y");
         string status = x.value("remark", "異常狀態");
+        string timestamp = x.value("timestamp", getCurrentDateTimeStr());
 
         type = (type == "OK") ? "N" : "Y";
         status = (type == "N") ? "OK" : x["remark"];
         
-        string msg = string(x["workOrder"]) + ";" + item + ";" + step + ";" + string(x["sht_no"]) + ";" + string(x["panel_no"]) + ";" + step + ";" + getCurrentDateTimeStr() + ";" + type + ";" + status + ";;";
+        string msg = string(x["workOrder"]) + ";" + item + ";" + step + ";" + string(x["sht_no"]) + ";" + string(x["panel_no"]) + ";" + step + ";" + timestamp + ";" + type + ";" + status + ";;";
 
         // 如果失敗或離線，會自動轉存 DB
         SafeSoapCall(emp, msg);
@@ -641,11 +672,12 @@ int main() {
             string rem = x.value("remark", "異常錯誤");
             string item = x.value("item", "NA");
             string step = x.value("workStep", "NA");
+            string timestamp = x.value("timestamp", getCurrentDateTimeStr());
 
             ret = (ret == "OK") ? "N" : "Y";
             if (ret == "N") rem = "OK";
             
-            string msg = wo + ";" + item + ";" + step + ";" + sht + ";" + pnl + ";" + step + ";" + getCurrentDateTimeStr() + ";" + ret + ";" + rem + ";;";
+            string msg = wo + ";" + item + ";" + step + ";" + sht + ";" + pnl + ";" + step + ";" + timestamp + ";" + ret + ";" + rem + ";;";
             
             // 策略判斷：
             // 1. 如果 g_isMesOnline = true，開 Thread 去送 (失敗還是會進 DB)

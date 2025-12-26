@@ -117,7 +117,9 @@ g++ BackendService.cpp -o backend.exe \
 ```
 
 2. 工單驗證與查詢 (`POST /api/workorder`)
-驗證工單資訊。 **邏輯**: 優先查詢本地 DB -> 若無則查詢 MES API 235 (新工單) -> 若失敗則查詢 MES API 236 (舊工單)。
+驗證工單資訊。 
+**邏輯**: 優先查詢本地 DB -> 若無則查詢 MES API 235 (新工單) -> 若失敗則查詢 MES API 236 (舊工單)。
+**新增邏輯**: 當 Backend 無法連線至 MES IT Server (Timeout 或斷線) 時，將回傳特定錯誤類型 mes_offline。
 
 * **Request Body:**
 ```JSON
@@ -128,7 +130,7 @@ g++ BackendService.cpp -o backend.exe \
 }
 ```
 
-* **Response (成功):**
+* **Response (成功 - 來自 DB 或 MES):**
 ```JSON
 {
   "success": true,
@@ -162,12 +164,22 @@ g++ BackendService.cpp -o backend.exe \
     ]
   }
 }
+```
 
-* **Response (失敗):**
+* **Response (失敗 - 查無資料):**
 ```JSON
 {
   "success": false,
   "message": "查無資料"
+}
+```
+
+* **Response (失敗 - MES 連線中斷) [NEW]:**
+```JSON
+{
+  "success": false,
+  "type": "mes_offline",
+  "message": "因與 IT server 網路中斷，因此工單查詢失敗"
 }
 ```
 
@@ -182,13 +194,22 @@ g++ BackendService.cpp -o backend.exe \
 }
 ```
 
-* **Response:**
+* **Response (成功):**
 ```JSON
 {
   "success": true,
   "result": { 
     "result": "OK" 
   }
+}
+```
+
+* **Response (失敗 - MES 連線中斷) [NEW]:**
+```JSON
+{
+  "success": false,
+  "type": "mes_offline",
+  "message": "因與 IT server 網路中斷，因此 2DID 資訊查詢失敗"
 }
 ```
 
