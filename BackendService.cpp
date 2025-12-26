@@ -279,16 +279,14 @@ json readWorkOrderFromDB(string wo) {
         if (res) {
             MYSQL_ROW row = mysql_fetch_row(res);
             if (row) {
-                // Assuming columns: work_order(0), product_item(1), work_step(2), panel_sum(3)...
-                // Note: Need to verify column index by name ideally, but for simplicity assuming schema order
-                // Or better, select specific columns
+                // 讀取工單主表
                 result["workorder"] = row[0] ? row[0] : "";
                 result["item"] = row[1] ? row[1] : "";
                 result["workStep"] = row[2] ? row[2] : "";
                 result["panel_num"] = row[3] ? stoi(row[3]) : 0;
-                mysql_free_result(res); // Free header result
+                mysql_free_result(res); 
 
-                // Fetch details
+                // 讀取預期清單 (Expected List)
                 string detailSql = "SELECT sheet_no, panel_no, twodid_step, twodid_type FROM 2DID_expected_products WHERE work_order = '" + sql_escape(wo) + "'";
                 if (mysql_query(con, detailSql.c_str()) == 0) {
                     MYSQL_RES* resDet = mysql_store_result(con);
@@ -303,6 +301,28 @@ json readWorkOrderFromDB(string wo) {
                     result["twodid_step"] = step; result["twodid_type"] = type;
                     mysql_free_result(resDet);
                 }
+
+                // ✅ [新增] 讀取已掃描紀錄 (Scanned List)
+                // 欄位對應: sheet_no(0), panel_no(1), twodid_type(2), twodid_status(3), timestamp(4)
+                string scanSql = "SELECT sheet_no, panel_no, twodid_type, twodid_status, timestamp FROM 2DID_scanned_products WHERE work_order = '" + sql_escape(wo) + "' ORDER BY timestamp ASC";
+                json scannedData = json::array();
+                
+                if (mysql_query(con, scanSql.c_str()) == 0) {
+                    MYSQL_RES* resScan = mysql_store_result(con);
+                    while ((row = mysql_fetch_row(resScan))) {
+                        json item;
+                        item["sheet_no"] = row[0] ? row[0] : "";
+                        item["panel_no"] = row[1] ? row[1] : "";
+                        item["twodid_type"] = row[2] ? row[2] : "";
+                        item["twodid_status"] = row[3] ? row[3] : ""; // Remark
+                        item["timestamp"] = row[4] ? std::stoll(row[4]) : 0;
+                        scannedData.push_back(item);
+                    }
+                    mysql_free_result(resScan);
+                }
+                // 將掃描資料加入結果中
+                result["scanned_data"] = scannedData;
+
             } else {
                 mysql_free_result(res);
             }
@@ -556,6 +576,8 @@ int main() {
             if (insertDB) saveWorkOrderToDB(d235);
             json j; j["workorder"] = d235.workorder; j["item"] = d235.item; j["workStep"] = d235.workStep; j["panel_num"] = d235.panel_num;
             j["sht_no"] = d235.sht_no; j["panel_no"] = d235.panel_no; j["twodid_step"] = d235.twodid_step; j["twodid_type"] = d235.twodid_type;
+            j["scanned_data"] = nullptr; 
+
             return crow::response(json{{"success", true}, {"source", "API235"}, {"data", j}}.dump());
         }
 
@@ -566,6 +588,8 @@ int main() {
             if (insertDB) saveWorkOrderToDB(d236);
             json j; j["workorder"] = d236.workorder; j["item"] = d236.item; j["workStep"] = d236.workStep; j["panel_num"] = d236.panel_num;
             j["sht_no"] = d236.sht_no; j["panel_no"] = d236.panel_no; j["twodid_step"] = d236.twodid_step; j["twodid_type"] = d236.twodid_type;
+            j["scanned_data"] = nullptr;
+
             return crow::response(json{{"success", true}, {"source", "API236"}, {"data", j}}.dump());
         }
 
@@ -588,8 +612,13 @@ int main() {
         string emp = x["emp_no"];
         string item = x.value("item", "NA");
         string step = x.value("workStep", "NA");
+        string type = x.value("twodid_type", "Y");
+        string status = x.value("remark", "異常狀態");
+
+        type = (type == "OK") ? "N" : "Y";
+        status = (type == "N") ? "OK" : x["remark"];
         
-        string msg = string(x["workOrder"]) + ";" + item + ";" + step + ";" + string(x["sht_no"]) + ";" + string(x["panel_no"]) + ";" + step + ";" + getCurrentDateTimeStr() + ";" + string(x["twodid_type"]) + ";" + string(x["remark"]) + ";;";
+        string msg = string(x["workOrder"]) + ";" + item + ";" + step + ";" + string(x["sht_no"]) + ";" + string(x["panel_no"]) + ";" + step + ";" + getCurrentDateTimeStr() + ";" + type + ";" + status + ";;";
 
         SoapClient::sendRequest(239, emp, msg);
         
@@ -615,10 +644,13 @@ int main() {
             string wo = x.value("workOrder", "");
             string sht = x.value("sht_no", "");
             string pnl = x.value("panel_no", "");
-            string ret = x.value("twodid_type", "");
-            string rem = x.value("remark", "");
+            string ret = x.value("twodid_type", "Y");
+            string rem = x.value("remark", "異常錯誤");
             string item = x.value("item", "NA");
             string step = x.value("workStep", "NA");
+
+            ret = (ret == "OK") ? "N" : "Y";
+            if (ret == "N") rem = "OK";
             
             string msg = wo + ";" + item + ";" + step + ";" + sht + ";" + pnl + ";" + step + ";" + getCurrentDateTimeStr() + ";" + ret + ";" + rem + ";;";
             futures.push_back(std::async(std::launch::async, [emp, msg](){ return SoapClient::sendRequest(239, emp, msg); }));

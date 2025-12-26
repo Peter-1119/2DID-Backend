@@ -132,7 +132,7 @@ g++ BackendService.cpp -o backend.exe \
 ```JSON
 {
   "success": true,
-  "source": "API235",  // 來源可能是 "DB", "API235", "API236"
+  "source": "DB",  // 來源: "DB" (含掃描紀錄) 或 "API235"/"API236" (無掃描紀錄)
   "data": {
     "workorder": "Y04900132",
     "item": "Product-A",
@@ -141,10 +141,27 @@ g++ BackendService.cpp -o backend.exe \
     "sht_no": ["SHT001", "SHT002", "..."],
     "panel_no": ["PNL001", "PNL002", "..."],
     "twodid_step": ["STEP-01", "STEP-01", "..."],
-    "twodid_type": ["OK", "OK", "..."]
+    "twodid_type": ["OK", "OK", "..."],
+    
+    // [新增] 已掃描紀錄清單 (若 source 為 API235/236 則此欄位為 null)
+    "scanned_data": [
+      {
+        "sheet_no": "SHT001",
+        "panel_no": "PNL001",
+        "twodid_type": "OK",
+        "twodid_status": "PASS",
+        "timestamp": 1708492800000
+      },
+      {
+        "sheet_no": "SHT002",
+        "panel_no": "PNL002",
+        "twodid_type": "NG",
+        "twodid_status": "Duplicate",
+        "timestamp": 1708492850000
+      }
+    ]
   }
 }
-```
 
 * **Response (失敗):**
 ```JSON
