@@ -304,7 +304,16 @@ json readWorkOrderFromDB(string wo) {
 
                 // ✅ [新增] 讀取已掃描紀錄 (Scanned List)
                 // 欄位對應: sheet_no(0), panel_no(1), twodid_type(2), twodid_status(3), timestamp(4)
-                string scanSql = "SELECT sheet_no, panel_no, twodid_type, twodid_status, timestamp FROM 2DID_scanned_products WHERE work_order = '" + sql_escape(wo) + "' ORDER BY timestamp ASC";
+                // string scanSql = "SELECT sheet_no, panel_no, twodid_type, twodid_status, timestamp FROM 2DID_scanned_products WHERE work_order = '" + sql_escape(wo) + "' ORDER BY timestamp ASC";
+                string scanSql = "WITH Ranked AS ("
+                 "  SELECT sheet_no, panel_no, twodid_type, twodid_status, timestamp, "
+                 "         ROW_NUMBER() OVER (PARTITION BY sheet_no ORDER BY timestamp DESC) as rn "
+                 "  FROM 2DID_scanned_products "
+                 "  WHERE work_order = '" + sql_escape(wo) + "' "
+                 ") "
+                 "SELECT sheet_no, panel_no, twodid_type, twodid_status, timestamp "
+                 "FROM Ranked WHERE rn = 1 "
+                 "ORDER BY timestamp ASC";
                 json scannedData = json::array();
                 
                 if (mysql_query(con, scanSql.c_str()) == 0) {
