@@ -1,6 +1,8 @@
 // BackendService.cpp
-#define WIN32_LEAN_AND_MEAN 
-#define NOMINMAX 
+#ifdef _WIN32
+    #define WIN32_LEAN_AND_MEAN 
+    #define NOMINMAX
+#endif
 
 #include "crow_all.h" 
 #include <mysql.h>    
@@ -41,6 +43,7 @@ struct WorkOrderData {
     string workorder, item, workStep;
     int panel_num = 0;
     vector<string> sht_no, panel_no, twodid_step, twodid_type;
+    bool cmd236_flag = false;
     bool valid = false;
 };
 
@@ -82,9 +85,14 @@ public:
         int timeout = 3;
         mysql_options(con, MYSQL_OPT_CONNECT_TIMEOUT, &timeout);
 
-        // 關閉 SSL 驗證 (解決 0x800B0109)
+        // 關閉 SSL 驗證 (解決 0x800B0109) for ㄎㄠ version MySQL Connector
         my_bool ssl_verify = 0; 
         mysql_options(con, MYSQL_OPT_SSL_VERIFY_SERVER_CERT, &ssl_verify);
+
+        // 關閉 SSL 驗證 (解決 0x800B0109) for new version MySQL Connector
+        // bool ssl_verify = false;
+        // unsigned int ssl_mode = SSL_MODE_DISABLED;
+        // mysql_options(con, MYSQL_OPT_SSL_MODE, &ssl_mode);
         if (mysql_real_connect(con, host.c_str(), user.c_str(), pass.c_str(), db.c_str(), port, NULL, 0) == NULL) {
             mysql_close(con);
             return nullptr;
@@ -201,7 +209,8 @@ WorkOrderData parseSoapResponse(string raw, string inputWO, int cmdType) {
     }
     if (lines.empty()) return data;
     data.workorder = inputWO;
-    data.panel_num = lines.size(); 
+    data.panel_num = lines.size();
+    data.cmd236_flag = (cmdType == 236) ? true : false;
     for (size_t i = 0; i < lines.size(); ++i) {
         stringstream lineSS(lines[i]);
         string segment;
@@ -238,8 +247,8 @@ void saveWorkOrderToDB(const WorkOrderData& d) {
     MYSQL* con = dbPool->getConnection();
     if (!con) return;
     mysql_query(con, "START TRANSACTION");
-    string sql = "INSERT INTO 2DID_workorder (work_order, product_item, work_step, panel_sum) VALUES ('" + 
-                 sql_escape(d.workorder) + "','" + sql_escape(d.item) + "','" + sql_escape(d.workStep) + "'," + to_string(d.panel_num) + 
+    string sql = "INSERT INTO 2DID_workorder (work_order, product_item, work_step, panel_sum, cmd236_flag) VALUES ('" + 
+                 sql_escape(d.workorder) + "','" + sql_escape(d.item) + "','" + sql_escape(d.workStep) + "'," + to_string(d.panel_num) + "," + to_string(d.cmd236_flag) + 
                  ") ON DUPLICATE KEY UPDATE product_item='" + sql_escape(d.item) + "', work_step='" + sql_escape(d.workStep) + "', panel_sum=" + to_string(d.panel_num);
     mysql_query(con, sql.c_str());
     string delSql = "DELETE FROM 2DID_expected_products WHERE work_order = '" + sql_escape(d.workorder) + "'";
@@ -271,6 +280,7 @@ json readWorkOrderFromDB(string wo) {
                 result["item"] = row[1] ? row[1] : "";
                 result["workStep"] = row[2] ? row[2] : "";
                 result["panel_num"] = row[3] ? stoi(row[3]) : 0;
+                result["cmd236_flag"] = row[4] ? stoi(row[4]) : 0;
                 mysql_free_result(res); 
 
                 string detailSql = "SELECT sheet_no, panel_no, twodid_step, twodid_type FROM 2DID_expected_products WHERE work_order = '" + sql_escape(wo) + "'";
@@ -533,7 +543,7 @@ int main() {
     // 前端每秒呼叫此 API，確認後端活著。Logger 已設定不顯示此紀錄。
     CROW_ROUTE(app, "/heartbeat").methods(crow::HTTPMethod::Get)
     ([](){
-        return crow::response("OK");
+        return crow::response(json{{"MES_alive", g_isMesOnline.load()}}.dump());
     });
 
     // API 1: Write DB (保持不變)
@@ -545,6 +555,7 @@ int main() {
         d.item = x.value("item", "");
         d.workStep = x.value("workStep", "");
         d.panel_num = x.value("panel_num", 0);
+        d.cmd236_flag = x.value("cmd236_flag", 0);
         if (x.contains("sht_no")) d.sht_no = x["sht_no"].get<vector<string>>();
         if (x.contains("panel_no")) d.panel_no = x["panel_no"].get<vector<string>>();
         if (x.contains("twodid_step")) d.twodid_step = x["twodid_step"].get<vector<string>>();
@@ -582,7 +593,7 @@ int main() {
         WorkOrderData d235 = parseSoapResponse(res235, wo, 235);
         if (d235.valid) {
             if (insertDB) saveWorkOrderToDB(d235);
-            json j; j["workorder"] = d235.workorder; j["item"] = d235.item; j["workStep"] = d235.workStep; j["panel_num"] = d235.panel_num;
+            json j; j["workorder"] = d235.workorder; j["item"] = d235.item; j["workStep"] = d235.workStep; j["panel_num"] = d235.panel_num; j["cmd236_flag"] = d235.cmd236_flag;
             j["sht_no"] = d235.sht_no; j["panel_no"] = d235.panel_no; j["twodid_step"] = d235.twodid_step; j["twodid_type"] = d235.twodid_type;
             j["scanned_data"] = nullptr; 
             return crow::response(json{{"success", true}, {"source", "API235"}, {"data", j}}.dump());
@@ -600,7 +611,7 @@ int main() {
         WorkOrderData d236 = parseSoapResponse(res236, wo, 236);
         if (d236.valid) {
             if (insertDB) saveWorkOrderToDB(d236);
-            json j; j["workorder"] = d236.workorder; j["item"] = d236.item; j["workStep"] = d236.workStep; j["panel_num"] = d236.panel_num;
+            json j; j["workorder"] = d236.workorder; j["item"] = d236.item; j["workStep"] = d236.workStep; j["panel_num"] = d236.panel_num; j["cmd236_flag"] = d236.cmd236_flag;
             j["sht_no"] = d236.sht_no; j["panel_no"] = d236.panel_no; j["twodid_step"] = d236.twodid_step; j["twodid_type"] = d236.twodid_type;
             j["scanned_data"] = nullptr;
             return crow::response(json{{"success", true}, {"source", "API236"}, {"data", j}}.dump());
@@ -650,7 +661,7 @@ int main() {
             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count()});
         saveScannedListToDB(list);
 
-        return crow::response(json{{"success", true}}.dump());
+        return crow::response(json{{"success", true, {"mes_status", g_isMesOnline ? "online" : "offline"}}}.dump());
     });
 
     // API 5: Batch
@@ -701,7 +712,7 @@ int main() {
         for (auto& f : futures) f.get(); 
         saveScannedListToDB(dbList);
 
-        return crow::response(json{{"success", true}, {"count", dbList.size()}}.dump());
+        return crow::response(json{{"success", true}, {"count", dbList.size()}, {"mes_status", g_isMesOnline ? "online" : "offline"}}.dump());
     });
 
     // API 6: Delete (保持不變)

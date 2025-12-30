@@ -140,10 +140,11 @@ g++ BackendService.cpp -o backend.exe \
     "item": "Product-A",
     "workStep": "STEP-01",
     "panel_num": 50,
+    "cmd236_flag": 0,
     "sht_no": ["SHT001", "SHT002", "..."],
     "panel_no": ["PNL001", "PNL002", "..."],
     "twodid_step": ["STEP-01", "STEP-01", "..."],
-    "twodid_type": ["OK", "OK", "..."],
+    "twodid_type": ["N", "Y", "..."],
     
     // [新增] 已掃描紀錄清單 (若 source 為 API235/236 則此欄位為 null)
     "scanned_data": [
@@ -229,10 +230,18 @@ g++ BackendService.cpp -o backend.exe \
 }
 ```
 
-* **Response:**
+* **Response (成功):**
 ```JSON
 {
   "success": true
+}
+```
+
+* **Response (失敗 - MES 連線中斷) [new]:**
+```JSON
+{
+  "success": true,
+  "mes_status": "offline"
 }
 ```
 
@@ -265,11 +274,20 @@ g++ BackendService.cpp -o backend.exe \
 ]
 ```
 
-* **Response:**
+* **Response (成功):**
 ```JSON
 {
   "success": true,
   "count": 2
+}
+```
+
+* **Response (失敗 - MES 連線中斷) [new]:**
+```JSON
+{
+  "success": true,
+  "count": 2,
+  "mes_status": "offline"
 }
 ```
 
