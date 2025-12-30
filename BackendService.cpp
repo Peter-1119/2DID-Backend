@@ -280,7 +280,7 @@ json readWorkOrderFromDB(string wo) {
                 result["item"] = row[1] ? row[1] : "";
                 result["workStep"] = row[2] ? row[2] : "";
                 result["panel_num"] = row[3] ? stoi(row[3]) : 0;
-                result["cmd236_flag"] = row[4] ? stoi(row[4]) : 0;
+                result["cmd236_flag"] = (stoi(row[4]) == 1) ? true : false;
                 mysql_free_result(res); 
 
                 string detailSql = "SELECT sheet_no, panel_no, twodid_step, twodid_type FROM 2DID_expected_products WHERE work_order = '" + sql_escape(wo) + "'";
