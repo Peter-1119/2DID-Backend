@@ -140,7 +140,7 @@ g++ BackendService.cpp -o backend.exe \
     "item": "Product-A",
     "workStep": "STEP-01",
     "panel_num": 50,
-    "cmd236_flag": 0,
+    "cmd236_flag": false,
     "sht_no": ["SHT001", "SHT002", "..."],
     "panel_no": ["PNL001", "PNL002", "..."],
     "twodid_step": ["STEP-01", "STEP-01", "..."],
