@@ -85,7 +85,7 @@ public:
         int timeout = 3;
         mysql_options(con, MYSQL_OPT_CONNECT_TIMEOUT, &timeout);
 
-        // 關閉 SSL 驗證 (解決 0x800B0109) for ㄎㄠ version MySQL Connector
+        // 關閉 SSL 驗證 (解決 0x800B0109) for old version MySQL Connector
         my_bool ssl_verify = 0; 
         mysql_options(con, MYSQL_OPT_SSL_VERIFY_SERVER_CERT, &ssl_verify);
 
