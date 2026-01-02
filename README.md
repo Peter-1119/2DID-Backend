@@ -155,9 +155,8 @@ g++ BackendService.cpp -o backend.exe \
 }
 ```
 
-4. 工單驗證與查詢 (`POST /api/workorder`)  
-    驗證工單資訊。 
-**邏輯**: 優先查詢本地 DB -> 若無則查詢 MES API 235 (新工單) -> 若失敗則查詢 MES API 236 (舊工單)。
+4. 工單驗證與查詢 (`POST /api/workorder`) 驗證工單資訊。   
+**邏輯**: 優先查詢本地 DB -> 若無則查詢 MES API 235 (新工單) -> 若失敗則查詢 MES API 236 (舊工單)。  
 **新增邏輯**: 當 Backend 無法連線至 MES IT Server (Timeout 或斷線) 時，將回傳特定錯誤類型 mes_offline。
 
 * **Request Body:**
