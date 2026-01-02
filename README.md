@@ -57,7 +57,7 @@ const string SOAP_URL = "http://YOUR_MES_IP/MESConnect.svc"; // MES WebService �
 
 ## 🚀 編譯與執行 (Build & Run)
 
-1. 編譯指令
+1. 編譯指令  
     請在 MSYS2 UCRT64 終端機中執行以下指令：
 ```Bash
 # 進入專案目錄
@@ -71,7 +71,7 @@ g++ BackendService.cpp -o backend.exe \
     -lcpr -lcurl -lmariadb -lws2_32 -lmswsock -lcrypt32 -lwldap32 -lssl -lcrypto
 ```
 
-2. 部署依賴 (DLLs)
+2. 部署依賴 (DLLs)  
     由於使用了動態連結，執行 backend.exe 需要依賴多個 DLL。請使用專用的 PowerShell 腳本打包：
 
 ```PowerShell
@@ -92,7 +92,7 @@ g++ BackendService.cpp -o backend.exe \
 ## 📡 API 介面文件 (API Documentation)
 所有 API 均接收 JSON 格式請求，並回傳 JSON 格式結果。
 
-1. 系統心跳檢測 (`GET /heartbeat`)
+1. 系統心跳檢測 (`GET /heartbeat`)  
     前端透過此 API 定期確認後端服務是否存活，並獲取目前後端與 MES Server 的連線狀態。
 
 * **Response:**
@@ -102,7 +102,7 @@ g++ BackendService.cpp -o backend.exe \
 }
 ```
 
-2. 員工工號驗證 Proxy (POST /api/validate_emp)
+2. 員工工號驗證 Proxy (POST /api/validate_emp)  
     CORS 解決方案：此 API 作為代理 (Proxy)，接收前端請求後，由 C++ 後端轉發至公司內網 IIS Server (ASMX) 進行驗證，再將結果回傳前端。解決瀏覽器直接呼叫外部 IIS 產生的跨域問題。
 
 * **Request Body:**
@@ -131,7 +131,7 @@ g++ BackendService.cpp -o backend.exe \
 }
 ```
 
-3. 寫入工單資料至資料庫 (`POST /write_to_database`)
+3. 寫入工單資料至資料庫 (`POST /write_to_database`)  
     直接將工單資訊寫入本地 MySQL 資料庫，不經過 MES 驗證。通常用於手動補單或測試。
 
 * **Request Body:**
@@ -155,7 +155,7 @@ g++ BackendService.cpp -o backend.exe \
 }
 ```
 
-4. 工單驗證與查詢 (`POST /api/workorder`)
+4. 工單驗證與查詢 (`POST /api/workorder`)  
     驗證工單資訊。 
 **邏輯**: 優先查詢本地 DB -> 若無則查詢 MES API 235 (新工單) -> 若失敗則查詢 MES API 236 (舊工單)。
 **新增邏輯**: 當 Backend 無法連線至 MES IT Server (Timeout 或斷線) 時，將回傳特定錯誤類型 mes_offline。
@@ -223,7 +223,7 @@ g++ BackendService.cpp -o backend.exe \
 }
 ```
 
-5. 條碼狀態查詢 (`POST /api/twodid`)
+5. 條碼狀態查詢 (`POST /api/twodid`)  
     查詢單一 2DID 條碼在 MES 中的狀態 (呼叫 MES API 238)。
 
 * **Request Body:**
@@ -253,7 +253,7 @@ g++ BackendService.cpp -o backend.exe \
 }
 ```
 
-6. 單筆資料上傳 (`POST /api/write2did`)
+6. 單筆資料上傳 (`POST /api/write2did`)  
     上傳單一掃描結果至 MES (呼叫 MES API 239) 並寫入本地 DB 紀錄。
 * **Request Body:**
 ```JSON
@@ -284,7 +284,7 @@ g++ BackendService.cpp -o backend.exe \
 }
 ```
 
-7. 批次資料上傳 (`POST /api/write2dids`)
+7. 批次資料上傳 (`POST /api/write2dids`)  
     **高效能接口**：同時上傳多筆資料。後端會自動以多執行緒 (Async) 並發處理，並進行流量控制 (每批次 10 筆請求)，最後一次性寫入資料庫。
 
 * **Request Body:** (JSON Array)
@@ -330,7 +330,7 @@ g++ BackendService.cpp -o backend.exe \
 }
 ```
 
-8. 清除工單資料 (`POST /api/Delete_2DID`)
+8. 清除工單資料 (`POST /api/Delete_2DID`)  
     作業結束時呼叫，清除本地資料庫中該工單的「預期清單 (Expected Products)」，但會保留「已掃描紀錄 (Scanned Products)」。
 
 * **Request Body:**
