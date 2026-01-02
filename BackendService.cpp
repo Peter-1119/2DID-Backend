@@ -32,6 +32,7 @@ const char* DB_USER = "sfuser";
 const char* DB_PASS = "1q2w3e4R"; 
 const char* DB_NAME = "sfdb4070"; 
 
+const string IIS_API_URL = "http://ksrv-web-ap3.flexium.local/gxfirstOIS/gxfirstOIS.asmx/GetOISData";
 const string SOAP_URL = "http://10.8.1.124/MESConnect.svc";
 const string SOAP_ACTION = "http://tempuri.org/IMESConnect/UpLoadImage";
 
@@ -86,13 +87,13 @@ public:
         mysql_options(con, MYSQL_OPT_CONNECT_TIMEOUT, &timeout);
 
         // 關閉 SSL 驗證 (解決 0x800B0109) for old version MySQL Connector
-        my_bool ssl_verify = 0; 
-        mysql_options(con, MYSQL_OPT_SSL_VERIFY_SERVER_CERT, &ssl_verify);
+        // my_bool ssl_verify = 0; 
+        // mysql_options(con, MYSQL_OPT_SSL_VERIFY_SERVER_CERT, &ssl_verify);
 
         // 關閉 SSL 驗證 (解決 0x800B0109) for new version MySQL Connector
-        // bool ssl_verify = false;
-        // unsigned int ssl_mode = SSL_MODE_DISABLED;
-        // mysql_options(con, MYSQL_OPT_SSL_MODE, &ssl_mode);
+        bool ssl_verify = false;
+        unsigned int ssl_mode = SSL_MODE_DISABLED;
+        mysql_options(con, MYSQL_OPT_SSL_MODE, &ssl_mode);
         if (mysql_real_connect(con, host.c_str(), user.c_str(), pass.c_str(), db.c_str(), port, NULL, 0) == NULL) {
             mysql_close(con);
             return nullptr;
@@ -541,9 +542,53 @@ int main() {
 
     // ✅ [Req 1] API: Heartbeat 
     // 前端每秒呼叫此 API，確認後端活著。Logger 已設定不顯示此紀錄。
-    CROW_ROUTE(app, "/heartbeat").methods(crow::HTTPMethod::Get)
-    ([](){
+    CROW_ROUTE(app, "/heartbeat").methods(crow::HTTPMethod::Get) ([](){
         return crow::response(json{{"MES_alive", g_isMesOnline.load()}}.dump());
+    });
+
+    // ✅ [Req 5] C++ Proxy API for Employee Validation
+    // 前端呼叫此 API -> C++ 轉發給 IIS -> 回傳結果給前端
+    CROW_ROUTE(app, "/api/validate_emp").methods(crow::HTTPMethod::Post) ([](const crow::request& req){
+        // 1. 解析前端傳來的 JSON
+        string empId;
+        try {
+            auto x = json::parse(req.body);
+            empId = x.value("empId", "");
+        } catch (const std::exception& e) {
+            cout << "[Proxy] JSON Parse Error: " << e.what() << endl;
+            return crow::response(400, "Invalid JSON format");
+        }
+
+        if (empId.empty()) {
+            cout << "[Proxy] Missing empId" << endl;
+            return crow::response(400, "Missing empId");
+        }
+
+        cout << "[Proxy] Forwarding request for EmpID: " << empId << endl;
+        
+        // 2. 建構 IIS ASMX 需要的參數 (模擬 Form Data) 建構內層的 JSON 字串: {"Emp_NO": "12345"}
+        json innerJson;
+        innerJson["Emp_NO"] = empId;
+        string innerJsonStr = innerJson.dump();
+
+        // 3. 使用 CPR 發送請求給 IIS
+        cpr::Response r = cpr::Post(
+            cpr::Url{IIS_API_URL},
+            cpr::Payload{ {"CmdCode", "5"}, {"InMessage_Json", innerJsonStr} },
+            cpr::Timeout{3000} // 設定 3 秒超時
+        );
+
+        // 4. 處理回應
+        if (r.status_code == 200) {
+            crow::response res(r.text);
+            res.add_header("Content-Type", "application/json"); 
+            return res;
+        } else {
+            cout << "[Proxy] IIS Failed. Status: " << r.status_code << " | Error: " << r.error.message << " | Body: " << r.text << endl;
+            
+            // 回傳 502 Bad Gateway 給前端，並附上錯誤訊息
+            return crow::response(502, json{ {"success", false}, {"message", "IIS Server Error: " + to_string(r.status_code)} }.dump());
+        }
     });
 
     // API 1: Write DB (保持不變)
