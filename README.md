@@ -257,14 +257,16 @@ g++ BackendService.cpp -o backend.exe \
 * **Request Body:**
 ```JSON
 {
-  "emp_no": "XXXXX",
+  "emp_no": "12868",
   "workOrder": "Y04900132",
-  "sht_no": "SHT12345",
-  "panel_no": "P05",
+  "sht_no": "4567123456789",
+  "panel_no": "4567123456789",
   "twodid_type": "OK", 
-  "remark": "PASS",
-  "item": "Product-A",
-  "workStep": "STEP-01"
+  "remark": "OK-IPC",
+  "item": "YD18379-04-A-A",
+  "workStep": "96",
+  "entryTime": "2016-01-15 15:18:00",
+  "exitTime": "2016-01-15 15:20:00"
 }
 ```
 
@@ -290,24 +292,28 @@ g++ BackendService.cpp -o backend.exe \
 ```JSON
 [
   {
-    "emp_no": "XXXXX",
+    "emp_no": "12868",
     "workOrder": "Y04900132",
-    "sht_no": "SHT001",
-    "panel_no": "P01",
-    "twodid_type": "OK",
-    "remark": "",
-    "item": "Product-A",
-    "workStep": "STEP-01"
+    "sht_no": "4567123456789",
+    "panel_no": "4567123456789",
+    "twodid_type": "OK", 
+    "remark": "OK-IPC",
+    "item": "YD18379-04-A-A",
+    "workStep": "96",
+    "entryTime": "2016-01-15 15:18:00",
+    "exitTime": "2016-01-15 15:20:00"
   },
   {
-    "emp_no": "XXXXX",
+    "emp_no": "12868",
     "workOrder": "Y04900132",
-    "sht_no": "SHT002",
-    "panel_no": "P02",
-    "twodid_type": "NG",
-    "remark": "Duplicate",
-    "item": "Product-A",
-    "workStep": "STEP-01"
+    "sht_no": "4567123456791",
+    "panel_no": "4567123456791",
+    "twodid_type": "OK", 
+    "remark": "OK-IPC",
+    "item": "YD18379-04-A-A",
+    "workStep": "96",
+    "entryTime": "2016-01-15 15:20:00",
+    "exitTime": "2016-01-15 15:22:00"
   }
 ]
 ```
