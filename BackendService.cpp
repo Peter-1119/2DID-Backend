@@ -481,6 +481,71 @@ json readWorkOrderFromDB(string wo) {
     return result;
 }
 
+json readPlcCameraIPFromDB(string machine_id) {
+    MYSQL* con = dbPool->getConnection();
+    if (!con) return nullptr;
+    
+    json result = nullptr;
+    string sql = "SELECT machine_id, hub_ip, camera_ip, camera_role FROM 2did_machine_cameras WHERE machine_id = '" + sql_escape(machine_id) + "'";
+
+    if (mysql_query(con, sql.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(con);
+        if (res) {
+            MYSQL_ROW row;
+            vector<string> left_cam_ip, right_cam_ip;
+            bool found = false;
+            
+            while ((row = mysql_fetch_row(res))) {
+                if (!found) {
+                    result["machine_id"] = machine_id;
+                    result["hub_ip"] = row[1] ? row[1] : "";
+                    found = true;
+                }
+
+                string role = row[3] ? row[3] : "";
+                string ip = row[2] ? row[2] : "";
+
+                if (role.find("LEFT") != string::npos) left_cam_ip.push_back(ip);
+                else if (role.find("RIGHT") != string::npos) right_cam_ip.push_back(ip);
+            }
+            if (found) {
+                result["cam"] = {{"left_cam_ip", left_cam_ip}, {"right_cam_ip", right_cam_ip}};
+            }
+            mysql_free_result(res);
+        }
+    }
+
+    string sql = "SELECT machine_id, plc_ip, plc_port, plc_type, addr_write_trigger, addr_write_result, metadata FROM 2did_machine_info WHERE machine_id = '" + sql_escape(machine_id) + "'";
+    if (mysql_query(con, sql.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(con);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row) {
+                result["plc_ip"] = row[1];
+                result["plc_port"] = row[2];
+                result["plc_type"] = row[3];
+                result["addr_write_trigger"] = row[4];
+                result["addr_write_result"] = row[5];
+
+                if (row[5]) {
+                    try{
+                        json metadata = json::parse(row[5]);
+                        for (auto& el : metadata.items()) {
+                            result[el.key()] = el.value();
+                        } catch(const std::exception& e) {
+                            spdlog::error("[DB] Metadata parse failed for {}: {}", machine_id, e.what());
+                        }
+                    }
+                }
+            }
+            mysql_free_result(res);
+        }
+    }
+
+    dbPool->releaseConnection(con);
+    return result;
+}
+
 void saveScannedListToDB(const vector<ScannedData>& list) {
     if (list.empty()) return;
     MYSQL* con = dbPool->getConnection();
@@ -803,9 +868,9 @@ int main() {
         string emp = x.value("emp_no", "");
         bool insertDB = x.value("insert_to_database", false);
 
-        cout << "workorder: " << wo << endl;
-        cout << "employee ID: " << emp << endl;
-        cout << "insertDB: " << insertDB << endl;
+        // cout << "workorder: " << wo << endl;
+        // cout << "employee ID: " << emp << endl;
+        // cout << "insertDB: " << insertDB << endl;
 
         // 1. 先查本地 DB
         json dbResult = readWorkOrderFromDB(wo);
@@ -1096,6 +1161,66 @@ int main() {
             }
         } catch (...) {
             return crow::response(400, "Invalid JSON");
+        }
+    });
+
+    CROW_ROUTE(app, "/api/get_ipc_config").methods(crow::HTTPMethod::Post) ([](const crow::request& req){
+        try {
+            auto x = json::parse(req.body);
+            string emp = x.value("emp_no", "");
+            string machine_code = x.value("machine_code", "");
+
+            if (emp.empty() || machine_code.empty()) {
+                return crow::response(400, json{{"success", false}, {"message", "Missing emp_no or machine_code"}}.dump());
+            }
+
+            // [Req 4] 檢查連線狀態，若斷線直接 Fast Fail
+            if (!g_isMesOnline) {
+                return crow::response(json{{"success", false}, {"type", "mes_offline"}, {"message", "因與 IT server 網路中斷，無法查詢機台配置"}}.dump());
+            }
+
+            cout << "[MES] Requesting CMD 254 for Machine: " << machine_code << " by Emp: " << emp << endl;
+
+            // 呼叫 SOAP CMD 254
+            string raw = SoapClient::sendRequest(254, emp, machine_code);
+
+            // 檢查是否因為 Timeout 導致連線失敗 (SafeSoapCall 邏輯的查詢版本)
+            if (raw.empty() && !g_isMesOnline) {
+                return crow::response(json{{"success", false}, {"type", "mes_offline"}, {"message", "因與 IT server 網路中斷，無法查詢機台配置"}}.dump());
+            }
+
+            // 如果成功獲取資料 (通常以 OK 開頭)
+            if (raw.find("OK") == 0) {
+                return crow::response(json{{"success", true}, {"raw_data", raw}}.dump());
+            }
+
+            // MES 回傳錯誤訊息
+            return crow::response(json{{"success", false}, {"message", "MES Response: " + raw}}.dump());
+
+        } catch (const std::exception& e) {
+            return crow::response(400, json{{"success", false}, {"message", "Invalid JSON format"}}.dump());
+        }
+    });
+
+    CROW_ROUTE(app, "/api/get-plc-cameras-ip").methods(crow::HTTPMethod::Post) ([](const crow::request& req) {
+        try {
+            auto x = json::parse(req.body);
+            string machine_id = x.value("machine_id", "");
+
+            if (machine_id.empty()) {
+                return crow::response(400, json{{"success", false}, {"message", "無收到任何機台代碼"}}.dump());
+            }
+
+            json dbResult = readPlcCameraIPFromDB(machine_id);
+
+            if (dbResult != nullptr && !dbResult.is_null()) {
+                return crow::response(200, json{{"success", true}, {"data", dbResult}}.dump());
+            }
+
+            return crow::response(401, json{{"success", false}, {"message", "該PLC尚未登入任何相機IP"}}.dump());
+
+        } catch (const std::exception& e) {
+            return crow::response(400, json{{"success", false}, {"message", "資料庫查詢失敗或格式錯誤"}}.dump());
         }
     });
 
