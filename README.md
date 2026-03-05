@@ -378,7 +378,7 @@ g++ BackendService.cpp -o backend.exe \
 ```
 
 10. 2DID 資料 Log 查看
-* **Response:**
+* **Request Body:**
 ```JSON
 {
   "product": "P1",
