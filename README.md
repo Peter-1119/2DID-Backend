@@ -352,6 +352,43 @@ g++ BackendService.cpp -o backend.exe \
 }
 ```
 
+9. pcs 2DID 資料上傳 (`POST /api/pcs_write`)
+    2DID 上傳
+
+* **Request Body:**
+```JSON
+{
+  "product": "P1",
+  "work_order": "WO123",
+  "pcs_id": "PCS0001",
+  "twodid_type": "A",
+  "twodid_status": "OK"
+}
+```
+
+```JSON
+{
+  "product": "P1",
+  "work_order": "WO123",
+  "pcs_id": "PCS0001",
+  "twodid_type": "A",
+  "twodid_status": "",
+  "timestamp": "2026-03-05 10:00:00"
+}
+```
+
+10. 2DID 資料 Log 查看
+* **Response:**
+```JSON
+{
+  "product": "P1",
+  "work_order": "WO123",
+  "time_from": "2026-03-01 00:00:00",
+  "time_to": "2026-03-31 23:59:59",
+  "page": 1,
+  "pageSize": 50
+}
+```
 ---
 
 ## 💾 資料庫結構 (Database Schema)

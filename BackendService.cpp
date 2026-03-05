@@ -481,70 +481,70 @@ json readWorkOrderFromDB(string wo) {
     return result;
 }
 
-json readPlcCameraIPFromDB(string machine_id) {
-    MYSQL* con = dbPool->getConnection();
-    if (!con) return nullptr;
+// json readPlcCameraIPFromDB(string machine_id) {
+//     MYSQL* con = dbPool->getConnection();
+//     if (!con) return nullptr;
     
-    json result = nullptr;
-    string sql = "SELECT machine_id, hub_ip, camera_ip, camera_role FROM 2did_machine_cameras WHERE machine_id = '" + sql_escape(machine_id) + "'";
+//     json result = nullptr;
+//     string sql = "SELECT machine_id, hub_ip, camera_ip, camera_role FROM 2did_machine_cameras WHERE machine_id = '" + sql_escape(machine_id) + "'";
 
-    if (mysql_query(con, sql.c_str()) == 0) {
-        MYSQL_RES* res = mysql_store_result(con);
-        if (res) {
-            MYSQL_ROW row;
-            vector<string> left_cam_ip, right_cam_ip;
-            bool found = false;
+//     if (mysql_query(con, sql.c_str()) == 0) {
+//         MYSQL_RES* res = mysql_store_result(con);
+//         if (res) {
+//             MYSQL_ROW row;
+//             vector<string> left_cam_ip, right_cam_ip;
+//             bool found = false;
             
-            while ((row = mysql_fetch_row(res))) {
-                if (!found) {
-                    result["machine_id"] = machine_id;
-                    result["hub_ip"] = row[1] ? row[1] : "";
-                    found = true;
-                }
+//             while ((row = mysql_fetch_row(res))) {
+//                 if (!found) {
+//                     result["machine_id"] = machine_id;
+//                     result["hub_ip"] = row[1] ? row[1] : "";
+//                     found = true;
+//                 }
 
-                string role = row[3] ? row[3] : "";
-                string ip = row[2] ? row[2] : "";
+//                 string role = row[3] ? row[3] : "";
+//                 string ip = row[2] ? row[2] : "";
 
-                if (role.find("LEFT") != string::npos) left_cam_ip.push_back(ip);
-                else if (role.find("RIGHT") != string::npos) right_cam_ip.push_back(ip);
-            }
-            if (found) {
-                result["cam"] = {{"left_cam_ip", left_cam_ip}, {"right_cam_ip", right_cam_ip}};
-            }
-            mysql_free_result(res);
-        }
-    }
+//                 if (role.find("LEFT") != string::npos) left_cam_ip.push_back(ip);
+//                 else if (role.find("RIGHT") != string::npos) right_cam_ip.push_back(ip);
+//             }
+//             if (found) {
+//                 result["cam"] = {{"left_cam_ip", left_cam_ip}, {"right_cam_ip", right_cam_ip}};
+//             }
+//             mysql_free_result(res);
+//         }
+//     }
 
-    string sql = "SELECT machine_id, plc_ip, plc_port, plc_type, addr_write_trigger, addr_write_result, metadata FROM 2did_machine_info WHERE machine_id = '" + sql_escape(machine_id) + "'";
-    if (mysql_query(con, sql.c_str()) == 0) {
-        MYSQL_RES* res = mysql_store_result(con);
-        if (res) {
-            MYSQL_ROW row = mysql_fetch_row(res);
-            if (row) {
-                result["plc_ip"] = row[1];
-                result["plc_port"] = row[2];
-                result["plc_type"] = row[3];
-                result["addr_write_trigger"] = row[4];
-                result["addr_write_result"] = row[5];
+//     string sql = "SELECT machine_id, plc_ip, plc_port, plc_type, addr_write_trigger, addr_write_result, metadata FROM 2did_machine_info WHERE machine_id = '" + sql_escape(machine_id) + "'";
+//     if (mysql_query(con, sql.c_str()) == 0) {
+//         MYSQL_RES* res = mysql_store_result(con);
+//         if (res) {
+//             MYSQL_ROW row = mysql_fetch_row(res);
+//             if (row) {
+//                 result["plc_ip"] = row[1];
+//                 result["plc_port"] = row[2];
+//                 result["plc_type"] = row[3];
+//                 result["addr_write_trigger"] = row[4];
+//                 result["addr_write_result"] = row[5];
 
-                if (row[5]) {
-                    try{
-                        json metadata = json::parse(row[5]);
-                        for (auto& el : metadata.items()) {
-                            result[el.key()] = el.value();
-                        } catch(const std::exception& e) {
-                            spdlog::error("[DB] Metadata parse failed for {}: {}", machine_id, e.what());
-                        }
-                    }
-                }
-            }
-            mysql_free_result(res);
-        }
-    }
+//                 if (row[5]) {
+//                     try{
+//                         json metadata = json::parse(row[5]);
+//                         for (auto& el : metadata.items()) {
+//                             result[el.key()] = el.value();
+//                         } catch(const std::exception& e) {
+//                             spdlog::error("[DB] Metadata parse failed for {}: {}", machine_id, e.what());
+//                         }
+//                     }
+//                 }
+//             }
+//             mysql_free_result(res);
+//         }
+//     }
 
-    dbPool->releaseConnection(con);
-    return result;
-}
+//     dbPool->releaseConnection(con);
+//     return result;
+// }
 
 void saveScannedListToDB(const vector<ScannedData>& list) {
     if (list.empty()) return;
@@ -1202,25 +1202,205 @@ int main() {
         }
     });
 
-    CROW_ROUTE(app, "/api/get-plc-cameras-ip").methods(crow::HTTPMethod::Post) ([](const crow::request& req) {
+    // CROW_ROUTE(app, "/api/get-plc-cameras-ip").methods(crow::HTTPMethod::Post) ([](const crow::request& req) {
+    //     try {
+    //         auto x = json::parse(req.body);
+    //         string machine_id = x.value("machine_id", "");
+
+    //         if (machine_id.empty()) {
+    //             return crow::response(400, json{{"success", false}, {"message", "無收到任何機台代碼"}}.dump());
+    //         }
+
+    //         json dbResult = readPlcCameraIPFromDB(machine_id);
+
+    //         if (dbResult != nullptr && !dbResult.is_null()) {
+    //             return crow::response(200, json{{"success", true}, {"data", dbResult}}.dump());
+    //         }
+
+    //         return crow::response(401, json{{"success", false}, {"message", "該PLC尚未登入任何相機IP"}}.dump());
+
+    //     } catch (const std::exception& e) {
+    //         return crow::response(400, json{{"success", false}, {"message", "資料庫查詢失敗或格式錯誤"}}.dump());
+    //     }
+    // });
+
+    // API: PCS Write
+    CROW_ROUTE(app, "/api/pcs_write").methods(crow::HTTPMethod::Post)
+    ([](const crow::request& req){
         try {
             auto x = json::parse(req.body);
-            string machine_id = x.value("machine_id", "");
 
-            if (machine_id.empty()) {
-                return crow::response(400, json{{"success", false}, {"message", "無收到任何機台代碼"}}.dump());
+            string product     = x.value("product", "");
+            string work_order  = x.value("work_order", "");
+            string pcs_id      = x.value("pcs_id", "");
+            string twodid_type = x.value("twodid_type", "");
+            string twodid_status = x.value("twodid_status", ""); // optional
+            string ts = x.value("timestamp", "");                // optional
+
+            // 必填欄位檢查
+            if (product.empty() || work_order.empty() || pcs_id.empty() || twodid_type.empty()) {
+                return crow::response(400, json{{"success", false}, {"message", "Missing required fields: product/work_order/pcs_id/twodid_type"}}.dump());
             }
 
-            json dbResult = readPlcCameraIPFromDB(machine_id);
+            MYSQL* con = dbPool->getConnection();
+            if (!con) return crow::response(500, json{{"success", false}, {"message", "DB connection failed"}}.dump());
 
-            if (dbResult != nullptr && !dbResult.is_null()) {
-                return crow::response(200, json{{"success", true}, {"data", dbResult}}.dump());
+            // 不帶 timestamp -> 讓 DB 自動填 CURRENT_TIMESTAMP
+            // 有帶 timestamp -> 寫入指定時間
+            bool hasTs = !ts.empty();
+
+            const char* q_with_ts =
+                "INSERT INTO pcs_records (product, work_order, pcs_id, twodid_type, twodid_status, `timestamp`) "
+                "VALUES (?, ?, ?, ?, ?, ?)";
+
+            const char* q_no_ts =
+                "INSERT INTO pcs_records (product, work_order, pcs_id, twodid_type, twodid_status) "
+                "VALUES (?, ?, ?, ?, ?)";
+
+            MYSQL_STMT* stmt = mysql_stmt_init(con);
+            if (!stmt) { dbPool->releaseConnection(con); return crow::response(500, "DB stmt init failed"); }
+
+            const char* query = hasTs ? q_with_ts : q_no_ts;
+            if (mysql_stmt_prepare(stmt, query, strlen(query)) != 0) {
+                string err = mysql_stmt_error(stmt);
+                mysql_stmt_close(stmt);
+                dbPool->releaseConnection(con);
+                return crow::response(500, json{{"success", false}, {"message", "Prepare failed: " + err}}.dump());
             }
 
-            return crow::response(401, json{{"success", false}, {"message", "該PLC尚未登入任何相機IP"}}.dump());
+            MYSQL_BIND bind[6];
+            memset(bind, 0, sizeof(bind));
+
+            unsigned long len_product = product.length();
+            unsigned long len_wo      = work_order.length();
+            unsigned long len_pcs     = pcs_id.length();
+            unsigned long len_type    = twodid_type.length();
+            unsigned long len_status  = twodid_status.length();
+            unsigned long len_ts      = ts.length();
+
+            // product
+            bind[0].buffer_type = MYSQL_TYPE_STRING;
+            bind[0].buffer = (char*)product.c_str();
+            bind[0].length = &len_product;
+
+            // work_order
+            bind[1].buffer_type = MYSQL_TYPE_STRING;
+            bind[1].buffer = (char*)work_order.c_str();
+            bind[1].length = &len_wo;
+
+            // pcs_id
+            bind[2].buffer_type = MYSQL_TYPE_STRING;
+            bind[2].buffer = (char*)pcs_id.c_str();
+            bind[2].length = &len_pcs;
+
+            // twodid_type
+            bind[3].buffer_type = MYSQL_TYPE_STRING;
+            bind[3].buffer = (char*)twodid_type.c_str();
+            bind[3].length = &len_type;
+
+            // twodid_status
+            bind[4].buffer_type = MYSQL_TYPE_STRING;
+            bind[4].buffer = (char*)twodid_status.c_str();
+            bind[4].length = &len_status;
+
+            int bindCount = 5;
+            if (hasTs) {
+                bind[5].buffer_type = MYSQL_TYPE_STRING;
+                bind[5].buffer = (char*)ts.c_str();
+                bind[5].length = &len_ts;
+                bindCount = 6;
+            }
+
+            if (mysql_stmt_bind_param(stmt, bind) != 0) {
+                string err = mysql_stmt_error(stmt);
+                mysql_stmt_close(stmt);
+                dbPool->releaseConnection(con);
+                return crow::response(500, json{{"success", false}, {"message", "Bind failed: " + err}}.dump());
+            }
+
+            if (mysql_stmt_execute(stmt) != 0) {
+                string err = mysql_stmt_error(stmt);
+                mysql_stmt_close(stmt);
+                dbPool->releaseConnection(con);
+                return crow::response(500, json{{"success", false}, {"message", "Execute failed: " + err}}.dump());
+            }
+
+            auto newId = (unsigned long long)mysql_insert_id(con);
+
+            mysql_stmt_close(stmt);
+            dbPool->releaseConnection(con);
+
+            return crow::response(json{{"success", true}, {"id", newId}}.dump());
+        } catch (const std::exception& e) {
+            return crow::response(400, json{{"success", false}, {"message", string("Invalid JSON: ") + e.what()}}.dump());
+        }
+    });
+
+    // API: PCS Read
+    CROW_ROUTE(app, "/api/pcs_read").methods(crow::HTTPMethod::Post)
+    ([](const crow::request& req){
+        try {
+            auto x = json::parse(req.body);
+
+            string product    = x.value("product", "");
+            string work_order = x.value("work_order", "");
+            string pcs_id     = x.value("pcs_id", "");
+
+            // timestamp range (optional)
+            string time_from  = x.value("time_from", ""); // "YYYY-MM-DD HH:MM:SS"
+            string time_to    = x.value("time_to", "");
+
+            int page = x.value("page", 1);
+            int pageSize = x.value("pageSize", 50);
+            if (page < 1) page = 1;
+            if (pageSize < 1) pageSize = 50;
+            if (pageSize > 500) pageSize = 500; // 避免一次撈爆
+
+            MYSQL* con = dbPool->getConnection();
+            if (!con) return crow::response(500, json{{"success", false}, {"message", "DB connection failed"}}.dump());
+
+            string sql = "SELECT id, product, work_order, pcs_id, twodid_type, twodid_status, `timestamp` "
+                        "FROM pcs_records WHERE 1=1";
+
+            if (!product.empty())    sql += " AND product = '" + sql_escape(product) + "'";
+            if (!work_order.empty()) sql += " AND work_order = '" + sql_escape(work_order) + "'";
+            if (!pcs_id.empty())     sql += " AND pcs_id = '" + sql_escape(pcs_id) + "'";
+            if (!time_from.empty())  sql += " AND `timestamp` >= '" + sql_escape(time_from) + "'";
+            if (!time_to.empty())    sql += " AND `timestamp` <= '" + sql_escape(time_to) + "'";
+
+            sql += " ORDER BY `timestamp` DESC";
+            sql += " LIMIT " + to_string(pageSize) + " OFFSET " + to_string((page - 1) * pageSize);
+
+            json items = json::array();
+
+            if (mysql_query(con, sql.c_str()) == 0) {
+                MYSQL_RES* res = mysql_store_result(con);
+                if (res) {
+                    MYSQL_ROW row;
+                    while ((row = mysql_fetch_row(res))) {
+                        json it;
+                        it["id"] = row[0] ? std::stoull(row[0]) : 0;
+                        it["product"] = row[1] ? row[1] : "";
+                        it["work_order"] = row[2] ? row[2] : "";
+                        it["pcs_id"] = row[3] ? row[3] : "";
+                        it["twodid_type"] = row[4] ? row[4] : "";
+                        it["twodid_status"] = row[5] ? row[5] : "";
+                        it["timestamp"] = row[6] ? row[6] : "";
+                        items.push_back(it);
+                    }
+                    mysql_free_result(res);
+                }
+            } else {
+                string err = mysql_error(con);
+                dbPool->releaseConnection(con);
+                return crow::response(500, json{{"success", false}, {"message", "Query failed: " + err}}.dump());
+            }
+
+            dbPool->releaseConnection(con);
+            return crow::response(json{{"success", true}, {"items", items}}.dump());
 
         } catch (const std::exception& e) {
-            return crow::response(400, json{{"success", false}, {"message", "資料庫查詢失敗或格式錯誤"}}.dump());
+            return crow::response(400, json{{"success", false}, {"message", string("Invalid JSON: ") + e.what()}}.dump());
         }
     });
 
