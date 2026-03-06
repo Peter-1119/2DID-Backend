@@ -1230,6 +1230,8 @@ int main() {
         try {
             auto x = json::parse(req.body);
 
+            // ✅ 新增 emp_id
+            string emp_id      = x.value("emp_id", "");
             string product     = x.value("product", "");
             string work_order  = x.value("work_order", "");
             string pcs_id      = x.value("pcs_id", "");
@@ -1237,25 +1239,24 @@ int main() {
             string twodid_status = x.value("twodid_status", ""); // optional
             string ts = x.value("timestamp", "");                // optional
 
-            // 必填欄位檢查
-            if (product.empty() || work_order.empty() || pcs_id.empty() || twodid_type.empty()) {
-                return crow::response(400, json{{"success", false}, {"message", "Missing required fields: product/work_order/pcs_id/twodid_type"}}.dump());
+            // ✅ 必填欄位檢查加入 emp_id
+            if (emp_id.empty() || product.empty() || work_order.empty() || pcs_id.empty() || twodid_type.empty()) {
+                return crow::response(400, json{{"success", false}, {"message", "Missing required fields: emp_id/product/work_order/pcs_id/twodid_type"}}.dump());
             }
 
             MYSQL* con = dbPool->getConnection();
             if (!con) return crow::response(500, json{{"success", false}, {"message", "DB connection failed"}}.dump());
 
-            // 不帶 timestamp -> 讓 DB 自動填 CURRENT_TIMESTAMP
-            // 有帶 timestamp -> 寫入指定時間
             bool hasTs = !ts.empty();
 
+            // ✅ SQL 語句加入 emp_id
             const char* q_with_ts =
-                "INSERT INTO pcs_records (product, work_order, pcs_id, twodid_type, twodid_status, `timestamp`) "
-                "VALUES (?, ?, ?, ?, ?, ?)";
+                "INSERT INTO 2did_pcs_records (emp_id, product, work_order, pcs_id, twodid_type, twodid_status, `timestamp`) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)";
 
             const char* q_no_ts =
-                "INSERT INTO pcs_records (product, work_order, pcs_id, twodid_type, twodid_status) "
-                "VALUES (?, ?, ?, ?, ?)";
+                "INSERT INTO 2did_pcs_records (emp_id, product, work_order, pcs_id, twodid_type, twodid_status) "
+                "VALUES (?, ?, ?, ?, ?, ?)";
 
             MYSQL_STMT* stmt = mysql_stmt_init(con);
             if (!stmt) { dbPool->releaseConnection(con); return crow::response(500, "DB stmt init failed"); }
@@ -1268,9 +1269,11 @@ int main() {
                 return crow::response(500, json{{"success", false}, {"message", "Prepare failed: " + err}}.dump());
             }
 
-            MYSQL_BIND bind[6];
+            // ✅ Bind 陣列大小從 6 改為 7
+            MYSQL_BIND bind[7];
             memset(bind, 0, sizeof(bind));
 
+            unsigned long len_emp     = emp_id.length();
             unsigned long len_product = product.length();
             unsigned long len_wo      = work_order.length();
             unsigned long len_pcs     = pcs_id.length();
@@ -1278,37 +1281,36 @@ int main() {
             unsigned long len_status  = twodid_status.length();
             unsigned long len_ts      = ts.length();
 
-            // product
+            // ✅ 綁定 emp_id (Index 0)
             bind[0].buffer_type = MYSQL_TYPE_STRING;
-            bind[0].buffer = (char*)product.c_str();
-            bind[0].length = &len_product;
+            bind[0].buffer = (char*)emp_id.c_str();
+            bind[0].length = &len_emp;
 
-            // work_order
+            // 後面的 Index 全部 +1
             bind[1].buffer_type = MYSQL_TYPE_STRING;
-            bind[1].buffer = (char*)work_order.c_str();
-            bind[1].length = &len_wo;
+            bind[1].buffer = (char*)product.c_str();
+            bind[1].length = &len_product;
 
-            // pcs_id
             bind[2].buffer_type = MYSQL_TYPE_STRING;
-            bind[2].buffer = (char*)pcs_id.c_str();
-            bind[2].length = &len_pcs;
+            bind[2].buffer = (char*)work_order.c_str();
+            bind[2].length = &len_wo;
 
-            // twodid_type
             bind[3].buffer_type = MYSQL_TYPE_STRING;
-            bind[3].buffer = (char*)twodid_type.c_str();
-            bind[3].length = &len_type;
+            bind[3].buffer = (char*)pcs_id.c_str();
+            bind[3].length = &len_pcs;
 
-            // twodid_status
             bind[4].buffer_type = MYSQL_TYPE_STRING;
-            bind[4].buffer = (char*)twodid_status.c_str();
-            bind[4].length = &len_status;
+            bind[4].buffer = (char*)twodid_type.c_str();
+            bind[4].length = &len_type;
 
-            int bindCount = 5;
+            bind[5].buffer_type = MYSQL_TYPE_STRING;
+            bind[5].buffer = (char*)twodid_status.c_str();
+            bind[5].length = &len_status;
+
             if (hasTs) {
-                bind[5].buffer_type = MYSQL_TYPE_STRING;
-                bind[5].buffer = (char*)ts.c_str();
-                bind[5].length = &len_ts;
-                bindCount = 6;
+                bind[6].buffer_type = MYSQL_TYPE_STRING;
+                bind[6].buffer = (char*)ts.c_str();
+                bind[6].length = &len_ts;
             }
 
             if (mysql_stmt_bind_param(stmt, bind) != 0) {
@@ -1342,31 +1344,63 @@ int main() {
         try {
             auto x = json::parse(req.body);
 
+            // ✅ 新增 emp_id 讀取
+            string emp_id     = x.value("emp_id", "");
             string product    = x.value("product", "");
             string work_order = x.value("work_order", "");
             string pcs_id     = x.value("pcs_id", "");
 
-            // timestamp range (optional)
-            string time_from  = x.value("time_from", ""); // "YYYY-MM-DD HH:MM:SS"
+            string time_from  = x.value("time_from", ""); 
             string time_to    = x.value("time_to", "");
 
             int page = x.value("page", 1);
             int pageSize = x.value("pageSize", 50);
             if (page < 1) page = 1;
             if (pageSize < 1) pageSize = 50;
-            if (pageSize > 500) pageSize = 500; // 避免一次撈爆
+            if (pageSize > 500) pageSize = 500; 
 
             MYSQL* con = dbPool->getConnection();
             if (!con) return crow::response(500, json{{"success", false}, {"message", "DB connection failed"}}.dump());
 
-            string sql = "SELECT id, product, work_order, pcs_id, twodid_type, twodid_status, `timestamp` "
-                        "FROM pcs_records WHERE 1=1";
+            // ✅ 將 WHERE 條件獨立拉出來，這樣 COUNT 和 SELECT 可以共用
+            string conditions = " WHERE 1=1";
+            if (!emp_id.empty())     conditions += " AND emp_id = '" + sql_escape(emp_id) + "'";
+            if (!product.empty())    conditions += " AND product = '" + sql_escape(product) + "'";
+            if (!work_order.empty()) conditions += " AND work_order = '" + sql_escape(work_order) + "'";
+            if (!pcs_id.empty())     conditions += " AND pcs_id = '" + sql_escape(pcs_id) + "'";
+            if (!time_from.empty())  conditions += " AND `timestamp` >= '" + sql_escape(time_from) + "'";
+            if (!time_to.empty())    conditions += " AND `timestamp` <= '" + sql_escape(time_to) + "'";
 
-            if (!product.empty())    sql += " AND product = '" + sql_escape(product) + "'";
-            if (!work_order.empty()) sql += " AND work_order = '" + sql_escape(work_order) + "'";
-            if (!pcs_id.empty())     sql += " AND pcs_id = '" + sql_escape(pcs_id) + "'";
-            if (!time_from.empty())  sql += " AND `timestamp` >= '" + sql_escape(time_from) + "'";
-            if (!time_to.empty())    sql += " AND `timestamp` <= '" + sql_escape(time_to) + "'";
+            // ==========================================
+            // 步驟 1: 計算總筆數 (Total Count) 與 總頁數 (Total Pages)
+            // ==========================================
+            long long total_count = 0;
+            string count_sql = "SELECT COUNT(*) FROM 2did_pcs_records" + conditions;
+            
+            if (mysql_query(con, count_sql.c_str()) == 0) {
+                MYSQL_RES* resCount = mysql_store_result(con);
+                if (resCount) {
+                    MYSQL_ROW row = mysql_fetch_row(resCount);
+                    if (row && row[0]) {
+                        total_count = std::stoll(row[0]);
+                    }
+                    mysql_free_result(resCount);
+                }
+            } else {
+                string err = mysql_error(con);
+                dbPool->releaseConnection(con);
+                return crow::response(500, json{{"success", false}, {"message", "Count query failed: " + err}}.dump());
+            }
+
+            // 計算總頁數 (無條件進位算法)
+            int total_pages = (total_count == 0) ? 1 : (total_count + pageSize - 1) / pageSize;
+
+            // ==========================================
+            // 步驟 2: 查詢該頁的實際資料
+            // ==========================================
+            // ✅ SELECT 加入 emp_id
+            string sql = "SELECT id, emp_id, product, work_order, pcs_id, twodid_type, twodid_status, `timestamp` "
+                         "FROM 2did_pcs_records" + conditions;
 
             sql += " ORDER BY `timestamp` DESC";
             sql += " LIMIT " + to_string(pageSize) + " OFFSET " + to_string((page - 1) * pageSize);
@@ -1379,13 +1413,14 @@ int main() {
                     MYSQL_ROW row;
                     while ((row = mysql_fetch_row(res))) {
                         json it;
-                        it["id"] = row[0] ? std::stoull(row[0]) : 0;
-                        it["product"] = row[1] ? row[1] : "";
-                        it["work_order"] = row[2] ? row[2] : "";
-                        it["pcs_id"] = row[3] ? row[3] : "";
-                        it["twodid_type"] = row[4] ? row[4] : "";
-                        it["twodid_status"] = row[5] ? row[5] : "";
-                        it["timestamp"] = row[6] ? row[6] : "";
+                        it["id"]            = row[0] ? std::stoull(row[0]) : 0;
+                        it["emp_id"]        = row[1] ? row[1] : ""; // ✅ 解析 emp_id
+                        it["product"]       = row[2] ? row[2] : ""; // 後面的 Index 配合往後推一格
+                        it["work_order"]    = row[3] ? row[3] : "";
+                        it["pcs_id"]        = row[4] ? row[4] : "";
+                        it["twodid_type"]   = row[5] ? row[5] : "";
+                        it["twodid_status"] = row[6] ? row[6] : "";
+                        it["timestamp"]     = row[7] ? row[7] : "";
                         items.push_back(it);
                     }
                     mysql_free_result(res);
@@ -1397,7 +1432,18 @@ int main() {
             }
 
             dbPool->releaseConnection(con);
-            return crow::response(json{{"success", true}, {"items", items}}.dump());
+
+            // ✅ 將 total_count, total_pages 一併包在 Response 裡回傳給前端
+            return crow::response(json{
+                {"success", true}, 
+                {"items", items},
+                {"pagination", {
+                    {"current_page", page},
+                    {"page_size", pageSize},
+                    {"total_count", total_count},
+                    {"total_pages", total_pages}
+                }}
+            }.dump());
 
         } catch (const std::exception& e) {
             return crow::response(400, json{{"success", false}, {"message", string("Invalid JSON: ") + e.what()}}.dump());

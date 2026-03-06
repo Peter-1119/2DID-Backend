@@ -358,6 +358,7 @@ g++ BackendService.cpp -o backend.exe \
 * **Request Body:**
 ```JSON
 {
+  "emp_id": "XXXXXX",
   "product": "P1",
   "work_order": "WO123",
   "pcs_id": "PCS0001",
@@ -381,6 +382,7 @@ g++ BackendService.cpp -o backend.exe \
 * **Request Body:**
 ```JSON
 {
+  "emp_id": "XXXXXX",
   "product": "P1",
   "work_order": "WO123",
   "time_from": "2026-03-01 00:00:00",
