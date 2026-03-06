@@ -1450,5 +1450,80 @@ int main() {
         }
     });
 
+    // API: PCS Delete
+    CROW_ROUTE(app, "/api/pcs_delete").methods(crow::HTTPMethod::Post)
+    ([](const crow::request& req){
+        try {
+            auto x = json::parse(req.body);
+
+            // 取得前端傳來的 pcs_id
+            string pcs_id = x.value("pcs_id", "");
+
+            // 必填檢查
+            if (pcs_id.empty()) {
+                return crow::response(400, json{{"success", false}, {"message", "Missing required field: pcs_id"}}.dump());
+            }
+
+            MYSQL* con = dbPool->getConnection();
+            if (!con) return crow::response(500, json{{"success", false}, {"message", "DB connection failed"}}.dump());
+
+            // 定義 DELETE 語法
+            const char* query = "DELETE FROM 2did_pcs_records WHERE pcs_id = ?";
+
+            MYSQL_STMT* stmt = mysql_stmt_init(con);
+            if (!stmt) { 
+                dbPool->releaseConnection(con); 
+                return crow::response(500, "DB stmt init failed"); 
+            }
+
+            if (mysql_stmt_prepare(stmt, query, strlen(query)) != 0) {
+                string err = mysql_stmt_error(stmt);
+                mysql_stmt_close(stmt);
+                dbPool->releaseConnection(con);
+                return crow::response(500, json{{"success", false}, {"message", "Prepare failed: " + err}}.dump());
+            }
+
+            // 綁定參數 (只有一個 pcs_id)
+            MYSQL_BIND bind[1];
+            memset(bind, 0, sizeof(bind));
+
+            unsigned long len_pcs = pcs_id.length();
+
+            bind[0].buffer_type = MYSQL_TYPE_STRING;
+            bind[0].buffer = (char*)pcs_id.c_str();
+            bind[0].length = &len_pcs;
+
+            if (mysql_stmt_bind_param(stmt, bind) != 0) {
+                string err = mysql_stmt_error(stmt);
+                mysql_stmt_close(stmt);
+                dbPool->releaseConnection(con);
+                return crow::response(500, json{{"success", false}, {"message", "Bind failed: " + err}}.dump());
+            }
+
+            if (mysql_stmt_execute(stmt) != 0) {
+                string err = mysql_stmt_error(stmt);
+                mysql_stmt_close(stmt);
+                dbPool->releaseConnection(con);
+                return crow::response(500, json{{"success", false}, {"message", "Execute failed: " + err}}.dump());
+            }
+
+            // 取得實際被刪除的筆數
+            long long deleted_count = mysql_stmt_affected_rows(stmt);
+
+            mysql_stmt_close(stmt);
+            dbPool->releaseConnection(con);
+
+            // 將刪除筆數一併回傳給前端
+            return crow::response(json{
+                {"success", true}, 
+                {"deleted_count", deleted_count},
+                {"message", "Successfully deleted " + to_string(deleted_count) + " record(s)"}
+            }.dump());
+
+        } catch (const std::exception& e) {
+            return crow::response(400, json{{"success", false}, {"message", string("Invalid JSON: ") + e.what()}}.dump());
+        }
+    });
+
     app.port(2151).multithreaded().run();
 }

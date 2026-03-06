@@ -378,7 +378,7 @@ g++ BackendService.cpp -o backend.exe \
 }
 ```
 
-10. 2DID 資料 Log 查看
+10. 2DID 資料 Log 查看(`POST /api/pcs_read`)
 * **Request Body:**
 ```JSON
 {
@@ -389,6 +389,14 @@ g++ BackendService.cpp -o backend.exe \
   "time_to": "2026-03-31 23:59:59",
   "page": 1,
   "pageSize": 50
+}
+```
+
+10. 2DID 刪除資料(`DELETE /api/pcs_delete`)
+* **Request Body:**
+```JSON
+{
+    "pcs_id": "XXXXXXXXXXXXX"
 }
 ```
 ---
