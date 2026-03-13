@@ -399,6 +399,61 @@ g++ BackendService.cpp -o backend.exe \
     "pcs_id": "XXXXXXXXXXXXX"
 }
 ```
+
+11. 機台代碼, IPC, PLC, CAM(`POST `) 
+
+* **Request Body:**
+```JSON
+{
+    "pm_code": "10004213",
+    "emp_no": "12868"
+}
+```
+
+* **Response:**
+```JSON
+{
+  "success": true,
+  "data": {
+    "machine_code": "L26K03",
+    "plc_ip": "10.8.142.137",
+    "camera_ip": {
+      "left": ["172.23.128.100", "172.23.128.101"],
+      "right": ["172.23.128.102", "172.23.128.103"]
+    }
+  }
+}
+```
+
+12. PLC 參數點位資料(`POST /api/get_plc_read_points`)
+* **Request Body:**
+```JSON
+{ "machine_pm": "R23F01" }
+```
+
+* **Response:**
+```JSON
+{
+  "success": true,
+  "request_id": "req-R23F01-1710300000",
+  "points": [
+    {
+      "addr": "D140",
+      "name": "預蝕刻噴霧壓力SV",
+      "data_type": "INT16",
+      "multiply": 100,
+      "unit": "kg/cm²"
+    },
+    {
+      "addr": "L988",
+      "name": "預蝕刻噴霧關槽SV",
+      "data_type": "BIT",
+      "multiply": 1,
+      "unit": ""
+    }
+  ]
+}
+```
 ---
 
 ## 💾 資料庫結構 (Database Schema)

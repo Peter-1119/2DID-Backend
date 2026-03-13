@@ -141,8 +141,12 @@ public:
 
         // 關閉 SSL 驗證 (解決 0x800B0109) for new version MySQL Connector
         bool ssl_verify = false;
-        unsigned int ssl_mode = SSL_MODE_DISABLED;
-        mysql_options(con, MYSQL_OPT_SSL_MODE, &ssl_mode);
+        // unsigned int ssl_mode = SSL_MODE_DISABLED;
+        // mysql_options(con, MYSQL_OPT_SSL_MODE, &ssl_mode);
+        #if defined(MYSQL_OPT_SSL_MODE)
+            unsigned int ssl_mode = SSL_MODE_DISABLED;
+            mysql_options(con, MYSQL_OPT_SSL_MODE, &ssl_mode);
+        #endif
         if (mysql_real_connect(con, host.c_str(), user.c_str(), pass.c_str(), db.c_str(), port, NULL, 0) == NULL) {
             mysql_close(con);
             return nullptr;
@@ -419,7 +423,8 @@ json readWorkOrderFromDB(string wo) {
     MYSQL* con = dbPool->getConnection();
     if (!con) return nullptr;
     json result = nullptr;
-    string sql = "SELECT * FROM 2DID_workorder WHERE work_order = '" + sql_escape(wo) + "'";
+    // string sql = "SELECT * FROM 2DID_workorder WHERE work_order = '" + sql_escape(wo) + "'";
+    string sql = "SELECT work_order, product_item, work_step, panel_sum, cmd236_flag FROM 2DID_workorder WHERE work_order = '" + sql_escape(wo) + "'";
     if (mysql_query(con, sql.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(con);
         if (res) {
@@ -1522,6 +1527,324 @@ int main() {
 
         } catch (const std::exception& e) {
             return crow::response(400, json{{"success", false}, {"message", string("Invalid JSON: ") + e.what()}}.dump());
+        }
+    });
+
+    // ========================================================================
+    // ✅ [新增] API: Frontend 專用 - 透過 PM 碼 (EQM_ID) 查詢機台代碼 (MACHINE_CODE)
+    // ========================================================================
+    CROW_ROUTE(app, "/api/get_machine_code").methods(crow::HTTPMethod::Post)
+    ([](const crow::request& req){
+        try {
+            auto x = json::parse(req.body);
+            string pm_code = x.value("pm_code", "");
+
+            if (pm_code.empty()) {
+                return crow::response(400, json{{"success", false}, {"message", "Missing pm_code"}}.dump());
+            }
+
+            MYSQL* con = dbPool->getConnection();
+            if (!con) return crow::response(500, json{{"success", false}, {"message", "DB connection failed"}}.dump());
+
+            // 根據你的需求，查詢 mes_machine_process 表
+            string sql = "SELECT MACHINE_CODE FROM mes_machine WHERE EQM_ID = '" + sql_escape(pm_code) + "'";
+            
+            string machine_code = "";
+            bool found = false;
+
+            if (mysql_query(con, sql.c_str()) == 0) {
+                MYSQL_RES* res = mysql_store_result(con);
+                if (res) {
+                    MYSQL_ROW row = mysql_fetch_row(res);
+                    if (row && row[0]) {
+                        machine_code = row[0];
+                        found = true;
+                    }
+                    mysql_free_result(res);
+                }
+            } else {
+                string err = mysql_error(con);
+                dbPool->releaseConnection(con);
+                cout << "[DB Error] get_machine_code query failed: " << err << endl;
+                return crow::response(500, json{{"success", false}, {"message", "Query failed"}}.dump());
+            }
+
+            dbPool->releaseConnection(con);
+
+            if (found) {
+                return crow::response(json{{"success", true}, {"machine_code", machine_code}}.dump());
+            } else {
+                return crow::response(404, json{{"success", false}, {"message", "找不到該 PM 碼對應的機台代碼"}}.dump());
+            }
+
+        } catch (const std::exception& e) {
+            return crow::response(400, json{{"success", false}, {"message", string("Invalid JSON: ") + e.what()}}.dump());
+        }
+    });
+
+    // Frontend (iPad) 呼叫此 API，拿到資料後直接送給 IPC 進行綁定
+    // ========================================================================
+    CROW_ROUTE(app, "/api/get_machine_config").methods(crow::HTTPMethod::Post)
+    ([](const crow::request& req){
+        try {
+            auto x = json::parse(req.body);
+            string pm_code = x.value("pm_code", "");
+            string emp = x.value("emp_no", "");
+
+            if (pm_code.empty() || emp.empty()) {
+                return crow::response(400, json{{"success", false}, {"message", "Missing pm_code or emp_no"}}.dump());
+            }
+
+            // ---------------------------------------------------------
+            // 步驟 1: 透過 PM 碼 (EQM_ID) 查詢機台代碼 (MACHINE_CODE)
+            // ---------------------------------------------------------
+            MYSQL* con = dbPool->getConnection();
+            if (!con) return crow::response(500, json{{"success", false}, {"message", "DB connection failed"}}.dump());
+
+            // 依照你提供的 SQL 語法，查詢 mes_machine_process 表
+            string sql = "SELECT MACHINE_CODE FROM mes_machine WHERE EQM_ID = '" + sql_escape(pm_code) + "'";
+            string machine_code = "";
+
+            if (mysql_query(con, sql.c_str()) == 0) {
+                MYSQL_RES* res = mysql_store_result(con);
+                if (res) {
+                    MYSQL_ROW row = mysql_fetch_row(res);
+                    if (row && row[0]) machine_code = row[0];
+                    mysql_free_result(res);
+                }
+            } else {
+                string err = mysql_error(con);
+                dbPool->releaseConnection(con);
+                cout << "[DB Error] get_machine_config query failed: " << err << endl;
+                return crow::response(500, json{{"success", false}, {"message", "DB Query failed"}}.dump());
+            }
+            dbPool->releaseConnection(con);
+
+            if (machine_code.empty()) {
+                return crow::response(404, json{{"success", false}, {"message", "找不到該 PM 碼對應的機台代碼"}}.dump());
+            }
+
+            // ---------------------------------------------------------
+            // 步驟 2: 拿著機台代碼向 MES (CMD 254) 請求硬體配置
+            // ---------------------------------------------------------
+            if (!g_isMesOnline) {
+                return crow::response(json{{"success", false}, {"type", "mes_offline"}, {"message", "因與 IT server 網路中斷，無法查詢機台配置"}}.dump());
+            }
+
+            cout << "[MES] Requesting CMD 254 for Machine: " << machine_code << " by Emp: " << emp << endl;
+            string raw = SoapClient::sendRequest(254, emp, machine_code);
+
+            if (raw.empty() && !g_isMesOnline) {
+                return crow::response(json{{"success", false}, {"type", "mes_offline"}, {"message", "因與 IT server 網路中斷，無法查詢機台配置"}}.dump());
+            }
+
+            // ---------------------------------------------------------
+            // 步驟 3: 解析 MES 回傳的字串並組裝成 JSON
+            // ---------------------------------------------------------
+            // 預期格式 1: OK;10.8.142.192;10.8.142.137;172.23.128.100 172.23.128.101;172.23.128.102;
+            // 預期格式 2: OK;10.8.142.192;10.8.142.137;;
+            // 錯誤格式:   NG;無此機台設定...
+
+            if (raw.find("OK;") == 0) {
+                vector<string> parts;
+                stringstream ss(raw);
+                string token;
+
+                // 根據 ';' 切割字串
+                while (getline(ss, token, ';')) {
+                    parts.push_back(token);
+                }
+
+                // 準備回傳給前端的資料結構
+                json result_data;
+                result_data["machine_code"] = machine_code;
+                
+                // IPC IP
+                result_data["ipc_ip"] = parts.size() > 1 ? parts[1] : "";
+
+                // PLC IP
+                result_data["plc_ip"] = parts.size() > 2 ? parts[2] : "";
+
+                // 解析 Camera IP
+                json camera_ip = json::object();
+                camera_ip["left"] = json::array();
+                camera_ip["right"] = json::array();
+
+                // 處理左邊相機 (Index 3)，使用空格切割
+                if (parts.size() > 3 && !parts[3].empty()) {
+                    stringstream cam_left_ss(parts[3]);
+                    string cam;
+                    while (getline(cam_left_ss, cam, ' ')) {
+                        if (!cam.empty()) camera_ip["left"].push_back(cam);
+                    }
+                }
+
+                // 處理右邊相機 (Index 4)，使用空格切割
+                if (parts.size() > 4 && !parts[4].empty()) {
+                    stringstream cam_right_ss(parts[4]);
+                    string cam;
+                    while (getline(cam_right_ss, cam, ' ')) {
+                        if (!cam.empty()) camera_ip["right"].push_back(cam);
+                    }
+                }
+
+                result_data["camera_ip"] = camera_ip;
+
+                return crow::response(json{{"success", true}, {"data", result_data}}.dump());
+            } 
+            else if (raw.find("NG;") == 0) {
+                // 如果 MES 回傳 NG，提取分號後面的錯誤訊息
+                string error_msg = raw.length() > 3 ? raw.substr(3) : "未知錯誤";
+                return crow::response(json{{"success", false}, {"message", "MES 回傳失敗: " + error_msg}}.dump());
+            } 
+            else {
+                return crow::response(json{{"success", false}, {"message", "MES 回傳格式異常: " + raw}}.dump());
+            }
+
+        } catch (const std::exception& e) {
+            return crow::response(400, json{{"success", false}, {"message", string("Invalid JSON format: ") + e.what()}}.dump());
+        }
+    });
+
+    // ========================================================================
+    // ✅ [新增] API: IPC 專用 - 透過機台代碼取得 PLC 連線參數與點位設定
+    // ========================================================================
+    CROW_ROUTE(app, "/api/get_plc_config").methods(crow::HTTPMethod::Post)
+    ([](const crow::request& req){
+        try {
+            auto x = json::parse(req.body);
+            string machine_id = x.value("machine_id", "");
+
+            if (machine_id.empty()) {
+                return crow::response(400, json{{"success", false}, {"message", "Missing machine_id"}}.dump());
+            }
+
+            MYSQL* con = dbPool->getConnection();
+            if (!con) return crow::response(500, json{{"success", false}, {"message", "DB connection failed"}}.dump());
+
+            string sql = "SELECT plc_ip, plc_port, plc_type, addr_write_trigger, addr_write_result, metadata "
+                         "FROM 2did_machine_info WHERE machine_id = '" + sql_escape(machine_id) + "'";
+            
+            json result_data;
+            bool found = false;
+
+            if (mysql_query(con, sql.c_str()) == 0) {
+                MYSQL_RES* res = mysql_store_result(con);
+                if (res) {
+                    MYSQL_ROW row = mysql_fetch_row(res);
+                    if (row) {
+                        found = true;
+                        result_data["plc_ip"] = row[0] ? row[0] : "";
+                        result_data["plc_port"] = row[1] ? std::stoi(row[1]) : 5000;
+                        result_data["plc_type"] = row[2] ? row[2] : "";
+                        result_data["addr_write_trigger"] = row[3] ? row[3] : "";
+                        result_data["addr_write_result"]  = row[4] ? row[4] : "";
+                        
+                        // 將資料庫中的 JSON 字串安全地解析成 JSON 物件
+                        if (row[5]) {
+                            try {
+                                result_data["metadata"] = json::parse(row[5]);
+                            } catch (const std::exception& e) {
+                                cout << "[DB Warn] Failed to parse metadata JSON for " << machine_id << ": " << e.what() << endl;
+                                result_data["metadata"] = json::object(); // 解析失敗就給空物件防呆
+                            }
+                        } else {
+                            result_data["metadata"] = json::object();
+                        }
+                    }
+                    mysql_free_result(res);
+                }
+            } else {
+                string err = mysql_error(con);
+                dbPool->releaseConnection(con);
+                cout << "[DB Error] get_plc_config query failed: " << err << endl;
+                return crow::response(500, json{{"success", false}, {"message", "Query failed"}}.dump());
+            }
+
+            dbPool->releaseConnection(con);
+
+            if (found) {
+                return crow::response(json{{"success", true}, {"data", result_data}}.dump());
+            } else {
+                return crow::response(404, json{{"success", false}, {"message", "找不到該機台的 PLC 配置設定"}}.dump());
+            }
+
+        } catch (const std::exception& e) {
+            return crow::response(400, json{{"success", false}, {"message", string("Invalid JSON: ") + e.what()}}.dump());
+        }
+    });
+
+    // ========================================================================
+    // ✅ API: 取得機台讀取點位列表 (Proxy API)
+    // 前端呼叫此 API，後端向 Python Server 取得原始資料後，
+    // 整理成 IPC WebSocket (READ_PARAM_POINT) 專用的輕量化格式回傳給前端。
+    // ========================================================================
+    CROW_ROUTE(app, "/api/get_plc_read_points").methods(crow::HTTPMethod::Post)
+    ([](const crow::request& req){
+        try {
+            auto x = json::parse(req.body);
+            string machine_pm = x.value("machine_pm", "");
+
+            if (machine_pm.empty()) {
+                return crow::response(400, json{{"success", false}, {"message", "Missing machine_pm parameter"}}.dump());
+            }
+
+            // 1. 使用 CPR 發送 HTTP GET 請求到你的 Python 伺服器
+            string target_url = "http://10.1.2.164:1111/get_param_info?machine_pm=" + machine_pm;
+            cpr::Response r = cpr::Get(cpr::Url{target_url}, cpr::Timeout{5000}); // 設定 5 秒 Timeout
+
+            // 檢查 HTTP 狀態碼
+            if (r.status_code != 200) {
+                string err_msg = "向 Python Server 請求失敗，HTTP 狀態碼: " + std::to_string(r.status_code);
+                return crow::response(500, json{{"success", false}, {"message", err_msg}}.dump());
+            }
+
+            // 2. 解析 Python 伺服器回傳的 JSON
+            json python_data = json::parse(r.text);
+            
+            if (!python_data.contains("data") || !python_data["data"].is_array()) {
+                return crow::response(500, json{{"success", false}, {"message", "Python 伺服器回傳的格式異常，找不到 data 陣列"}}.dump());
+            }
+
+            // 3. 整理與轉換格式 (瘦身為 IPC 需要的格式)
+            json points_array = json::array();
+            for (const auto& item : python_data["data"]) {
+                json point;
+                
+                // 欄位對應轉換 (依據你之前提供給我的 IPC 格式)
+                point["addr"] = item.value("PARAM_ADDRESS", "");
+                point["name"] = item.value("PARAM_NAME", "");
+                point["data_type"] = item.value("READ_BIT", "INT16"); // 預設給 INT16
+                
+                // 將字串型態的 multiply 轉換為數字型態
+                string multiply_str = item.value("PARAM_MULTIPLY", "1");
+                try {
+                    point["multiply"] = std::stoi(multiply_str);
+                } catch (...) {
+                    point["multiply"] = 1; // 轉換失敗的防呆預設值
+                }
+
+                // 如果前端畫面顯示需要單位，可以順便傳下去
+                if (item.contains("PARAM_UNIT") && !item["PARAM_UNIT"].is_null()) {
+                    point["unit"] = item["PARAM_UNIT"];
+                } else {
+                    point["unit"] = "";
+                }
+
+                points_array.push_back(point);
+            }
+
+            // 4. 組合最終回傳給前端的 JSON
+            json response_json;
+            response_json["success"] = true;
+            // 順便幫前端產一個不重複的 request_id，方便前端等一下直接塞進 WS
+            response_json["request_id"] = "req-" + machine_pm + "-" + std::to_string(std::time(nullptr)); 
+            response_json["points"] = points_array;
+            
+            return crow::response(response_json.dump());
+
+        } catch (const std::exception& e) {
+            return crow::response(400, json{{"success", false}, {"message", string("Error: ") + e.what()}}.dump());
         }
     });
 
